@@ -35,7 +35,7 @@ jobs:
           test -s /tmp/review.diff
           test "$(wc -c </tmp/review.diff)" -le 75000 || { echo "Diff too large; manual review required"; exit 1; }
           test "$(grep -c '^diff --git ' /tmp/review.diff)" -eq "$(jq -r .changed_files /tmp/pr.json)" || { echo "Incomplete diff"; exit 1; }
-          if grep -Eq '^(Binary files |GIT binary patch|literal [0-9]+$)' /tmp/review.diff; then echo "Binary file change requires manual review"; exit 1; fi
+          if grep -Eq '^(Binary files |GIT binary patch|literal [0-9]+$|[+-]Subproject commit |(new file mode|deleted file mode|old mode|new mode) 160000$|index [0-9a-f]+\.\.[0-9a-f]+ 160000$)' /tmp/review.diff; then echo "Binary or submodule change requires manual review"; exit 1; fi
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" > /tmp/pr-after.json
           jq -e --slurpfile before /tmp/pr.json '.head.sha == $before[0].head.sha and .base.sha == $before[0].base.sha and .changed_files == $before[0].changed_files and .additions == $before[0].additions and .deletions == $before[0].deletions' /tmp/pr-after.json >/dev/null || { echo "PR changed during review capture"; exit 1; }
           jq -r .head.sha /tmp/pr.json > /tmp/reviewed-head-sha
@@ -61,7 +61,7 @@ jobs:
           "Do not output secrets.\n--- BEGIN UNTRUSTED DIFF ---\n"+diff+
           "\n--- END UNTRUSTED DIFF ---")
           with open('/tmp/request.json','w') as f:
-              json.dump({"systemInstruction":{"parts":[{"text":guidance}]},"contents":[{"parts":[{"text":instructions}]}],"generationConfig":{"temperature":0.1,"maxOutputTokens":4096}},f)
+              json.dump({"systemInstruction":{"parts":[{"text":guidance}]},"contents":[{"parts":[{"text":instructions}]}],"generationConfig":{"maxOutputTokens":4096}},f)
           PY
           curl --fail-with-body --silent --show-error --max-time 90             -H "x-goog-api-key: $GEMINI_API_KEY"             -H 'Content-Type: application/json'             --data-binary @/tmp/request.json             'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent'             -o /tmp/response.json
           jq -e '.candidates[0].finishReason == "STOP" and ([.candidates[0].content.parts[]? | .text? // empty] | join("") | length > 0)' /tmp/response.json >/dev/null || { echo "Gemini response incomplete, blocked, or truncated"; exit 1; }
