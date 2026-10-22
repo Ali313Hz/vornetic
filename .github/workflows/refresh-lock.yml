@@ -26,6 +26,7 @@ jobs:
       - name: Refresh lockfile and verify dependencies
         run: |
           npm install --package-lock-only --ignore-scripts --no-audit
+          npm audit fix --package-lock-only --ignore-scripts
           npm ci --ignore-scripts
           npm run check:syntax
           npm audit --audit-level=high --omit=dev
