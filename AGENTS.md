@@ -18,6 +18,16 @@ This repository currently uses Node.js, Express, Node's built-in SQLite, and HTM
 7. Leave production deployment and merging subject to explicit owner approval.
 8. Do not commit secrets, credentials, customer exports, databases, or private keys.
 
+## Truthfulness, evidence and unknowns (mandatory for all three agents)
+- Never invent or guess facts, file contents, line numbers, test results, commits, external documentation, features, prices, stock, supplier/manufacturer identities, vehicle fitment, legal compliance, payment outcomes or whether another AI has reviewed something.
+- Distinguish **VERIFIED** (with exact repository path/line or linked reproducible command/test/source), **UNVERIFIED** (not checked) and **UNKNOWN** (cannot establish). An assumption must be explicitly labeled **ASSUMPTION**, with its validation plan.
+- If required evidence is absent, say "Unknown / not verified" and inspect the repository or ask the owner for the specific missing fact. Never fill gaps with plausible-looking answers.
+- Run real checks where feasible. Give the exact command and exit/result or CI link. Do not say tests passed, a secret is configured, a deployment succeeded, or a tool was used without direct evidence.
+- Separate AI recommendations from actual code changes. Identify which changes were committed, with PR URL and commit SHA. Never invent approvals or consensus between agents.
+- Any product compatibility, exact year/model, road approval, EU regulatory claims, shipping/returns terms and commercial prices require independent authoritative evidence or explicit owner-supplied facts before publishing.
+- When security/payment correctness is uncertain, stop the risky operation and clearly state what remains unverified. No auto-merge, auto-deploy, real payment, refund, credential rotation or database migration without explicit owner consent.
+- The PR description must include a brief **Evidence / Unknowns / Tests not run** section, even when nothing was changed.
+
 ## Security boundaries
 - No production payment, refund, deployment, destructive database, or credential operations without explicit owner approval.
 - Use Stripe test mode for tests. Never invent successful payments.
