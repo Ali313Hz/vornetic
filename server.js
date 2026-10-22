@@ -14,12 +14,16 @@ const catalog = require('./catalog');
 
 const app = express();
 const PORT = process.env.PORT || 3300;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'vornetic2026';
+const DEFAULT_ADMIN_PASSWORD = 'vornetic2026';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || '';
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-if (ADMIN_PASSWORD === 'vornetic2026') console.warn('⚠  Using the default admin password. Set ADMIN_PASSWORD before going live.');
+// The default password is public (README, source). In production it never unlocks the panel.
+const ADMIN_LOCKED = IS_PROD && ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD;
+if (ADMIN_LOCKED) console.error('✖  Admin login disabled: set a strong ADMIN_PASSWORD in .env (the default one is not allowed in production).');
+else if (ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD) console.warn('⚠  Using the default admin password. Set ADMIN_PASSWORD before going live.');
 
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -66,7 +70,8 @@ const upload = multer({
 const hits = new Map();
 function limit(max, windowMs) {
   return (req, res, next) => {
-    const key = req.path + '|' + req.ip;
+    // Express routing ignores case and a trailing slash, so the key must too
+    const key = (req.path.toLowerCase().replace(/\/+$/, '') || '/') + '|' + req.ip;
     const now = Date.now();
     const arr = (hits.get(key) || []).filter(t => now - t < windowMs);
     if (arr.length >= max) return res.status(429).json({ error: 'Too many requests, try again later' });
@@ -433,17 +438,24 @@ function stripeCheckout({ ref, email, lang, items, shipping, base }) {
 // ============================================================
 const adminCookie = { httpOnly: true, sameSite: 'strict', secure: IS_PROD, maxAge: 14 * 24 * 3600 * 1000 };
 
+// Every successful start logs all admins out (see app.listen below). A session issued before
+// a deploy or under an earlier ADMIN_PASSWORD (e.g. the public default) can never outlive the
+// process that issued it, and nothing derived from the password is stored.
+const revokeAdminSessions = () => db.exec('DELETE FROM admin_sessions');
+
 function requireAdmin(req, res, next) {
   const t = req.cookies.admin;
-  const s = t && db.prepare("SELECT * FROM admin_sessions WHERE token = ? AND created_at > datetime('now','-14 day')").get(t);
+  const s = !ADMIN_LOCKED && t && db.prepare(
+    "SELECT * FROM admin_sessions WHERE token = ? AND created_at > datetime('now','-14 day')").get(t);
   if (!s) return res.status(401).json({ error: 'Not authorised' });
   next();
 }
 
 app.post('/api/admin/login', limit(8, 15 * 60 * 1000), (req, res) => {
-  const given = Buffer.from(String((req.body || {}).password || ''));
-  const real = Buffer.from(ADMIN_PASSWORD);
-  if (given.length !== real.length || !crypto.timingSafeEqual(given, real))
+  if (ADMIN_LOCKED) return res.status(503).json({ error: 'Admin login disabled: set ADMIN_PASSWORD on the server' });
+  // Compare fixed-length digests so the check does not reveal the password length
+  const digest = v => crypto.createHash('sha256').update(String(v)).digest();
+  if (!crypto.timingSafeEqual(digest((req.body || {}).password || ''), digest(ADMIN_PASSWORD)))
     return res.status(401).json({ error: 'Wrong password' });
   const token = crypto.randomBytes(32).toString('hex');
   db.prepare('INSERT INTO admin_sessions (token) VALUES (?)').run(token);
@@ -795,7 +807,12 @@ app.get(/^\/(?!api|uploads).*/, (req, res) => {
 backup();
 setInterval(backup, 6 * 3600 * 1000).unref();
 
-const server = app.listen(PORT, () => console.log(`Vornetic → http://localhost:${PORT}   Admin → http://localhost:${PORT}/admin`));
+const server = app.listen(PORT, () => {
+  // Only once the port is ours: a start that fails (e.g. EADDRINUSE because another instance
+  // is running on the same data) must not log out that instance's admins.
+  revokeAdminSessions();
+  console.log(`Vornetic → http://localhost:${PORT}   Admin → http://localhost:${PORT}/admin`);
+});
 server.on('error', err => {
   if (err.code === 'EADDRINUSE') {
     console.error(`\n✖ Port ${PORT} is already used by another program (maybe another project).`);

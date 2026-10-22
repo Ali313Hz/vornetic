@@ -5,7 +5,8 @@
   "description": "Vornetic online store — xenon, LED and car mats",
   "main": "server.js",
   "scripts": {
-    "start": "node --env-file-if-exists=.env server.js"
+    "start": "node --env-file-if-exists=.env server.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=22.5"
