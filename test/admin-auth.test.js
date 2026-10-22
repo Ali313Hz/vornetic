@@ -19,8 +19,12 @@ const freePort = () => new Promise((resolve, reject) => {
   }).on('error', reject);
 });
 
-async function startServer(env = {}) {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vornetic-test-'));
+const tempDataDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'vornetic-test-'));
+
+// Pass `dataDir` to reuse a database across restarts; the caller then removes it.
+async function startServer(env = {}, dataDir) {
+  const ownDir = !dataDir;
+  if (ownDir) dataDir = tempDataDir();
   const port = await freePort();
   const childEnv = { ...process.env, PORT: String(port), DATA_DIR: dataDir, NODE_ENV: 'test', ...env };
   for (const k of Object.keys(childEnv)) if (childEnv[k] === undefined) delete childEnv[k];
@@ -45,7 +49,7 @@ async function startServer(env = {}) {
       child.removeAllListeners('exit');
       child.kill();
       await new Promise(r => child.once('close', r));
-      fs.rmSync(dataDir, { recursive: true, force: true });
+      if (ownDir) fs.rmSync(dataDir, { recursive: true, force: true });
     },
   };
 }
@@ -129,4 +133,89 @@ test('in development the default password still works (local setup unchanged)', 
   try {
     assert.strictEqual((await login(srv.base, 'vornetic2026')).status, 200);
   } finally { await srv.stop(); }
+});
+
+// ---------- Sessions issued before an upgrade or under another password (Codex review, PR #4) ----------
+const { DatabaseSync } = require('node:sqlite');
+const me = (base, cookie) => fetch(base + '/api/admin/me', { headers: { Cookie: cookie } });
+
+// A database as the previous release left it: admin_sessions without the password tag,
+// holding a live token (e.g. one obtained with the public default password).
+function seedPreUpgradeSession(dataDir) {
+  const token = 'b'.repeat(64);
+  const db = new DatabaseSync(path.join(dataDir, 'store.db'));
+  db.exec("CREATE TABLE admin_sessions (token TEXT PRIMARY KEY, created_at TEXT DEFAULT (datetime('now')))");
+  db.prepare('INSERT INTO admin_sessions (token) VALUES (?)').run(token);
+  db.close();
+  return 'admin=' + token;
+}
+
+test('pre-upgrade admin session is rejected when a strong password is configured', async () => {
+  const dir = tempDataDir();
+  try {
+    const cookie = seedPreUpgradeSession(dir);
+    const srv = await startServer({ NODE_ENV: 'production', ADMIN_PASSWORD: TEST_PASSWORD }, dir);
+    try {
+      assert.strictEqual((await me(srv.base, cookie)).status, 401);
+      const orders = await fetch(srv.base + '/api/admin/orders', { headers: { Cookie: cookie } });
+      assert.strictEqual(orders.status, 401);
+      // the stale row is removed at startup, not only ignored
+      const db = new DatabaseSync(path.join(dir, 'store.db'));
+      try {
+        const row = db.prepare('SELECT 1 FROM admin_sessions WHERE token = ?').get(cookie.slice('admin='.length));
+        assert.strictEqual(row, undefined);
+      } finally { db.close(); }
+      // a fresh login with the real password still works
+      const res = await login(srv.base, TEST_PASSWORD);
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual((await me(srv.base, cookieOf(res))).status, 200);
+    } finally { await srv.stop(); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('pre-upgrade admin session is rejected while production is locked (default password)', async () => {
+  const dir = tempDataDir();
+  try {
+    const cookie = seedPreUpgradeSession(dir);
+    const srv = await startServer({ NODE_ENV: 'production', ADMIN_PASSWORD: undefined }, dir);
+    try {
+      assert.notStrictEqual((await me(srv.base, cookie)).status, 200);
+      const s = await fetch(srv.base + '/api/admin/settings', { headers: { Cookie: cookie } });
+      assert.notStrictEqual(s.status, 200);
+    } finally { await srv.stop(); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('session made with the default password stops working once a strong password is set', async () => {
+  const dir = tempDataDir();
+  try {
+    let cookie;
+    const dev = await startServer({ ADMIN_PASSWORD: undefined }, dir);
+    try {
+      const res = await login(dev.base, 'vornetic2026');
+      assert.strictEqual(res.status, 200);
+      cookie = cookieOf(res);
+      assert.strictEqual((await me(dev.base, cookie)).status, 200);
+    } finally { await dev.stop(); }
+
+    const prod = await startServer({ NODE_ENV: 'production', ADMIN_PASSWORD: TEST_PASSWORD }, dir);
+    try {
+      assert.strictEqual((await me(prod.base, cookie)).status, 401);
+    } finally { await prod.stop(); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('changing ADMIN_PASSWORD ends old sessions; restarting with the same one keeps them', async () => {
+  const dir = tempDataDir();
+  try {
+    let cookie;
+    const first = await startServer({ ADMIN_PASSWORD: TEST_PASSWORD }, dir);
+    try { cookie = cookieOf(await login(first.base, TEST_PASSWORD)); } finally { await first.stop(); }
+
+    const same = await startServer({ ADMIN_PASSWORD: TEST_PASSWORD }, dir);
+    try { assert.strictEqual((await me(same.base, cookie)).status, 200); } finally { await same.stop(); }
+
+    const changed = await startServer({ ADMIN_PASSWORD: TEST_PASSWORD + '-rotated' }, dir);
+    try { assert.strictEqual((await me(changed.base, cookie)).status, 401); } finally { await changed.stop(); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

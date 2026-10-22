@@ -129,6 +129,8 @@ for (const sql of [
   "ALTER TABLE products ADD COLUMN combos TEXT DEFAULT ''",
   "ALTER TABLE products ADD COLUMN media TEXT DEFAULT ''",
   "ALTER TABLE products ADD COLUMN status TEXT DEFAULT 'available'",
+  // Which admin password a session was issued under (NULL = issued before this column existed)
+  'ALTER TABLE admin_sessions ADD COLUMN pw_tag TEXT',
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 db.exec('CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id)');
 
