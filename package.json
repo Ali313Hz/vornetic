@@ -5,15 +5,16 @@
   "description": "Vornetic online store — xenon, LED and car mats",
   "main": "server.js",
   "scripts": {
-    "start": "node --env-file-if-exists=.env server.js"
+    "start": "node --env-file-if-exists=.env server.js",
+    "check:syntax": "node --check server.js && node --check db.js && node --check catalog.js && node --check mail.js"
   },
   "engines": {
     "node": ">=22.5"
   },
   "dependencies": {
     "cookie-parser": "^1.4.6",
-    "express": "^4.19.2",
-    "multer": "^1.4.5-lts.1",
-    "nodemailer": "^6.10.1"
+    "express": "^4.22.3",
+    "multer": "^2.0.2",
+    "nodemailer": "^10.2.1"
   }
 }
