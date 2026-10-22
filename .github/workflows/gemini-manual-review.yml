@@ -50,7 +50,7 @@ jobs:
           test -n "$GEMINI_API_KEY" || { echo "Configure GEMINI_API_KEY secret"; exit 1; }
           python3 - <<'PY'
           import json
-          with open('/tmp/review.diff',encoding='utf-8',errors='replace') as f:
+          with open('/tmp/review.diff',encoding='utf-8',errors='strict') as f:
               diff=f.read()
           with open('/tmp/trusted-review-guidance.md',encoding='utf-8') as f:
               guidance=f.read()
