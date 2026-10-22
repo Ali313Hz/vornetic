@@ -31,7 +31,7 @@ jobs:
           jq -e '.state == "open" and .base.repo.private == false and .head.repo.private == false and .changed_files > 0 and .changed_files <= 30 and (.additions + .deletions) <= 1500' /tmp/pr.json >/dev/null || { echo "Only small public PRs supported"; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files?per_page=100" > /tmp/pr-files.json
           jq -e --slurpfile meta /tmp/pr.json 'length == $meta[0].changed_files and all(.[]; .patch != null)' /tmp/pr-files.json >/dev/null || { echo "Incomplete or binary file patches; manual review required"; exit 1; }
-          gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" > /tmp/review.diff
+          gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --allow-escape-sequences --color never > /tmp/review.diff
           test -s /tmp/review.diff
           test "$(wc -c </tmp/review.diff)" -le 75000 || { echo "Diff too large; manual review required"; exit 1; }
           test "$(grep -c '^diff --git ' /tmp/review.diff)" -eq "$(jq -r .changed_files /tmp/pr.json)" || { echo "Incomplete diff"; exit 1; }
@@ -63,7 +63,7 @@ jobs:
           with open('/tmp/request.json','w') as f:
               json.dump({"systemInstruction":{"parts":[{"text":guidance}]},"contents":[{"parts":[{"text":instructions}]}],"generationConfig":{"temperature":0.1,"maxOutputTokens":4096}},f)
           PY
-          curl --fail-with-body --silent --show-error --max-time 90             -H "x-goog-api-key: $GEMINI_API_KEY"             -H 'Content-Type: application/json'             --data-binary @/tmp/request.json             'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'             -o /tmp/response.json
+          curl --fail-with-body --silent --show-error --max-time 90             -H "x-goog-api-key: $GEMINI_API_KEY"             -H 'Content-Type: application/json'             --data-binary @/tmp/request.json             'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent'             -o /tmp/response.json
           jq -e '.candidates[0].finishReason == "STOP" and ([.candidates[0].content.parts[]? | .text? // empty] | join("") | length > 0)' /tmp/response.json >/dev/null || { echo "Gemini response incomplete, blocked, or truncated"; exit 1; }
           {
             echo '## Gemini manual review (AI suggestions; not a security guarantee)'
