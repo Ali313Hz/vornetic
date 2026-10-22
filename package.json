@@ -1,0 +1,19 @@
+{
+  "name": "vornetic",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Vornetic online store — xenon, LED and car mats",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.6",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^6.10.1"
+  }
+}

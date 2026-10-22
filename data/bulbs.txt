@@ -1,0 +1,92 @@
+# Vornetic — bulb list per car (first version, to be checked).
+# Format:  Brand | Model | Generation | low=…, high=…, fog=…, xenon=…
+#   low   = halogen low beam        high = high beam
+#   fog   = front fog light         xenon = low beam on cars with factory xenon
+# Brand / model / generation must be written exactly as in cars.txt.
+# Leave a key out when you are not sure — the site then tells the customer to check the bulb or ask on WhatsApp.
+# After the first start this list is edited from the admin panel (Ampuller tab), not from this file.
+
+BMW | 1 Series | E81/E82/E87/E88 | low=H7, high=H7, fog=H11, xenon=D1S
+BMW | 1 Series | F20/F21 | low=H7, high=H7, xenon=D1S
+BMW | 3 Series | E46 | low=H7, high=H7, fog=HB4, xenon=D2S
+BMW | 3 Series | E90/E91/E92/E93 | low=H7, high=H7, fog=H11, xenon=D1S
+BMW | 3 Series | F30/F31/F34 | low=H7, high=H7, xenon=D1S
+BMW | 5 Series | E39 | low=H7, high=H7, fog=HB4, xenon=D2S
+BMW | 5 Series | E60/E61 | low=H7, high=H7, fog=H11, xenon=D1S
+BMW | 5 Series | F10/F11 | xenon=D1S
+BMW | X1 | E84 | low=H7, high=H7, fog=H11, xenon=D1S
+BMW | X3 | E83 | low=H7, high=H7, fog=HB4, xenon=D2S
+BMW | X3 | F25 | xenon=D1S
+BMW | X5 | E53 | low=H7, high=H7, fog=HB4, xenon=D2S
+BMW | X5 | E70 | xenon=D1S
+BMW | X6 | E71 | xenon=D1S
+
+Audi | A1 | 8X | low=H7, high=H7, xenon=D3S
+Audi | A3 | 8P | low=H7, high=H1, xenon=D1S
+Audi | A3 | 8V | low=H7, high=H7, xenon=D3S
+Audi | A4 | B6 | low=H7, high=H7, xenon=D2S
+Audi | A4 | B7 | low=H7, high=H7, xenon=D1S
+Audi | A4 | B8 | low=H7, high=H7, xenon=D3S
+Audi | A5 | 8T | xenon=D3S
+Audi | A6 | C6 | low=H7, high=H7, xenon=D1S
+Audi | A6 | C7 | xenon=D3S
+Audi | Q5 | 8R | low=H7, high=H7, xenon=D3S
+Audi | Q7 | 4L | xenon=D3S
+Audi | TT | 8J | xenon=D1S
+
+Volkswagen | Golf | Mk4 | low=H7, high=H1, fog=HB4, xenon=D2S
+Volkswagen | Golf | Mk5 | low=H7, high=H1, fog=HB4, xenon=D1S
+Volkswagen | Golf | Mk6 | low=H7, fog=H8, xenon=D3S
+Volkswagen | Golf | Mk7 | low=H7, high=H7, fog=H8, xenon=D3S
+Volkswagen | Passat | B5 | low=H7, xenon=D2S
+Volkswagen | Passat | B6 | low=H7, high=H7, fog=HB4, xenon=D1S
+Volkswagen | Passat | B7 | low=H7, high=H7, fog=H8, xenon=D3S
+Volkswagen | Polo | 9N | low=H4
+Volkswagen | Polo | 6R/6C | low=H4
+Volkswagen | Touareg | 7L | xenon=D2S
+Volkswagen | Touareg | 7P | xenon=D3S
+Volkswagen | Scirocco | 13 | xenon=D3S
+
+SEAT | Ibiza | 6J | low=H4
+SEAT | León | 1P | low=H7, high=H1
+SEAT | León | 5F | xenon=D3S
+SEAT | Altea | 5P | low=H7, high=H1
+SEAT | Exeo | 3R | low=H7, high=H7, xenon=D1S
+
+Škoda | Octavia | 1Z | low=H7, high=H1, xenon=D1S
+Škoda | Octavia | 5E | low=H7, high=H7, fog=H8, xenon=D3S
+Škoda | Fabia | 5J | low=H4
+Škoda | Superb | 3T | xenon=D3S
+
+Mercedes-Benz | C-Class | W203 | low=H7, high=H7, xenon=D2S
+Mercedes-Benz | C-Class | W204 | low=H7, high=H7, fog=H11, xenon=D1S
+Mercedes-Benz | E-Class | W211 | low=H7, high=H7, xenon=D2S
+Mercedes-Benz | E-Class | W212 | low=H7, high=H7, fog=H11, xenon=D1S
+Mercedes-Benz | CLS | C219 | xenon=D2S
+Mercedes-Benz | GLE / ML | W164 (ML) | xenon=D2S
+Mercedes-Benz | S-Class | W221 | xenon=D1S
+
+Ford | Focus | Mk2 | low=H7, high=H1, fog=H11, xenon=D1S
+Ford | Fiesta | Mk7 | low=H4
+Ford | Mondeo | Mk4 | xenon=D1S
+Ford | Kuga | Mk1 | xenon=D1S
+
+Opel | Astra | H | low=H7, high=H1, xenon=D1S
+Opel | Corsa | D | low=H4
+Opel | Insignia | A | low=H7, high=H7, xenon=D3S
+
+Renault | Clio | III | low=H7, high=H1
+Renault | Mégane | II | low=H7, high=H1
+Renault | Laguna | III | xenon=D1S
+
+Peugeot | 407 | 6D | xenon=D1S
+Peugeot | 308 | T7 | low=H7, high=H1
+
+Dacia | Sandero | 1st gen | low=H4
+Dacia | Sandero | 2nd gen | low=H4
+Dacia | Logan | 2nd gen | low=H4
+Dacia | Duster | 1st gen | low=H4
+
+MINI | Cooper / Hatch | R56 | low=H4, xenon=D1S
+
+Toyota | Yaris | XP130 | low=H4

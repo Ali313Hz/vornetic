@@ -1,0 +1,664 @@
+# Vornetic car list
+# Format:  Model | Generation / body code | first year-last year | engines (comma separated, optional)
+# A line starting with "# " starts a new brand. Edit freely and restart the server.
+
+# Alfa Romeo
+147 | 937 | 2000-2010 | 1.6 TS, 2.0 TS, 1.9 JTD, 1.9 JTDm, 3.2 V6 GTA
+156 | 932 | 1997-2007 | 1.6 TS, 1.8 TS, 2.0 TS, 2.0 JTS, 2.5 V6, 1.9 JTD, 2.4 JTD
+159 | 939 | 2005-2011 | 1.8 MPI, 1.75 TBi, 2.2 JTS, 1.9 JTDm, 2.0 JTDm, 2.4 JTDm
+Giulietta | 940 | 2010-2020 | 1.4 TB, 1.4 MultiAir, 1.75 TBi, 1.6 JTDm, 2.0 JTDm
+MiTo | 955 | 2008-2018 | 1.4, 1.4 MultiAir, 1.3 JTDm, 1.6 JTDm
+Giulia | 952 | 2016-2026 | 2.0 Turbo 200, 2.0 Turbo 280, 2.2 D 160, 2.2 D 210, 2.9 V6 Quadrifoglio
+Stelvio | 949 | 2017-2026 | 2.0 Turbo 200, 2.0 Turbo 280, 2.2 D 160, 2.2 D 210, 2.9 V6 Quadrifoglio
+Tonale | 965 | 2022-2026 | 1.5 Hybrid 130, 1.5 Hybrid 160, 1.6 JTDm, 1.3 PHEV Q4
+
+# Audi
+A1 | 8X | 2010-2018 | 1.0 TFSI, 1.2 TFSI, 1.4 TFSI, 1.6 TDI, 1.4 TDI, S1 2.0 TFSI
+A1 | GB | 2018-2026 | 25 TFSI, 30 TFSI, 35 TFSI, 40 TFSI
+A3 | 8L | 1996-2003 | 1.6, 1.8, 1.8T, 1.9 TDI, S3 1.8T
+A3 | 8P | 2003-2012 | 1.6, 1.4 TFSI, 1.8 TFSI, 2.0 FSI, 2.0 TFSI, 1.6 TDI, 1.9 TDI, 2.0 TDI, 3.2 V6, S3 2.0 TFSI
+A3 | 8V | 2012-2020 | 1.0 TFSI, 1.4 TFSI, 1.5 TFSI, 1.8 TFSI, 2.0 TFSI, 1.6 TDI, 2.0 TDI, e-tron, S3, RS3
+A3 | 8Y | 2020-2026 | 30 TFSI, 35 TFSI, 40 TFSI e, 30 TDI, 35 TDI, S3, RS3
+A4 | B5 | 1994-2001 | 1.6, 1.8, 1.8T, 2.4 V6, 2.8 V6, 1.9 TDI, 2.5 TDI
+A4 | B6 | 2000-2004 | 1.6, 2.0, 1.8T, 3.0 V6, 1.9 TDI, 2.5 TDI
+A4 | B7 | 2004-2008 | 1.6, 2.0, 2.0 TFSI, 3.2 FSI, 1.9 TDI, 2.0 TDI, 2.7 TDI, 3.0 TDI
+A4 | B8 | 2007-2015 | 1.8 TFSI, 2.0 TFSI, 3.2 FSI, 2.0 TDI, 2.7 TDI, 3.0 TDI, S4
+A4 | B9 | 2015-2024 | 35 TFSI, 40 TFSI, 45 TFSI, 30 TDI, 35 TDI, 40 TDI, 50 TDI, S4
+A5 | 8T | 2007-2016 | 1.8 TFSI, 2.0 TFSI, 3.2 FSI, 2.0 TDI, 2.7 TDI, 3.0 TDI, S5
+A5 | F5 | 2016-2024 | 35 TFSI, 40 TFSI, 45 TFSI, 35 TDI, 40 TDI, 50 TDI, S5
+A5 | B10 | 2024-2026 | TFSI, TDI, S5
+A6 | C5 | 1997-2004 | 1.8T, 2.4 V6, 2.8 V6, 1.9 TDI, 2.5 TDI
+A6 | C6 | 2004-2011 | 2.0 TFSI, 2.4, 2.8 FSI, 3.2 FSI, 2.0 TDI, 2.7 TDI, 3.0 TDI
+A6 | C7 | 2011-2018 | 2.0 TFSI, 2.8 FSI, 3.0 TFSI, 2.0 TDI, 3.0 TDI
+A6 | C8 | 2018-2026 | 40 TFSI, 45 TFSI, 55 TFSI, 40 TDI, 45 TDI, 50 TDI
+A7 | 4G | 2010-2018 | 2.8 FSI, 3.0 TFSI, 3.0 TDI
+A7 | 4K | 2018-2026 | 45 TFSI, 55 TFSI, 40 TDI, 45 TDI, 50 TDI
+A8 | D3 | 2002-2010 | 3.2 FSI, 4.2, 3.0 TDI, 4.2 TDI
+A8 | D4 | 2010-2017 | 3.0 TFSI, 4.0 TFSI, 3.0 TDI, 4.2 TDI
+A8 | D5 | 2017-2026 | 55 TFSI, 50 TDI, 60 TFSI e
+Q2 | GA | 2016-2026 | 30 TFSI, 35 TFSI, 30 TDI, 35 TDI, SQ2
+Q3 | 8U | 2011-2018 | 1.4 TFSI, 2.0 TFSI, 2.0 TDI, RS Q3
+Q3 | F3 | 2018-2026 | 35 TFSI, 40 TFSI, 45 TFSI, 35 TDI, 40 TDI, 45 TFSI e
+Q5 | 8R | 2008-2017 | 2.0 TFSI, 3.2 FSI, 2.0 TDI, 3.0 TDI, SQ5
+Q5 | FY | 2017-2024 | 40 TFSI, 45 TFSI, 35 TDI, 40 TDI, 50 TDI, 55 TFSI e, SQ5
+Q5 | GU | 2024-2026 | TFSI, TDI, SQ5
+Q7 | 4L | 2005-2015 | 3.6 FSI, 4.2 FSI, 3.0 TDI, 4.2 TDI
+Q7 | 4M | 2015-2026 | 45 TFSI, 55 TFSI, 45 TDI, 50 TDI, 55 TFSI e
+Q8 | 4M | 2018-2026 | 55 TFSI, 50 TDI, 60 TFSI e, SQ8, RS Q8
+TT | 8N | 1998-2006 | 1.8T, 3.2 V6
+TT | 8J | 2006-2014 | 1.8 TFSI, 2.0 TFSI, 3.2 V6, 2.0 TDI, TTS, TT RS
+TT | 8S | 2014-2023 | 40 TFSI, 45 TFSI, 2.0 TDI, TTS, TT RS
+Q4 e-tron | F4 | 2021-2026 | 35, 40, 45, 50, 55
+e-tron / Q8 e-tron | GE | 2018-2026 | 50, 55, S
+
+# BMW
+1 Series | E81/E82/E87/E88 | 2004-2011 | 116i, 118i, 120i, 130i, 135i, 116d, 118d, 120d, 123d
+1 Series | F20/F21 | 2011-2019 | 114i, 116i, 118i, 120i, 125i, M135i, M140i, 114d, 116d, 118d, 120d, 125d
+1 Series | F40 | 2019-2024 | 116i, 118i, 120i, 128ti, M135i, 116d, 118d, 120d
+1 Series | F70 | 2024-2026 | 120, M135, 118d, 120d
+2 Series | F22/F23 | 2014-2021 | 218i, 220i, 228i, 230i, M235i, M240i, 218d, 220d, 225d, M2
+2 Series Active/Gran Tourer | F45/F46 | 2014-2021 | 216i, 218i, 220i, 225xe, 216d, 218d, 220d
+2 Series Gran Coupé | F44 | 2020-2026 | 218i, 220i, M235i, 216d, 218d, 220d
+2 Series | G42 | 2021-2026 | 220i, 230i, M240i, 220d, M2
+3 Series | E36 | 1990-2000 | 316i, 318i, 320i, 323i, 325i, 328i, 318tds, 325td, 325tds, M3
+3 Series | E46 | 1998-2006 | 316i, 318i, 320i, 323i, 325i, 328i, 330i, 318d, 320d, 330d, M3
+3 Series | E90/E91/E92/E93 | 2005-2013 | 316i, 318i, 320i, 323i, 325i, 330i, 335i, 316d, 318d, 320d, 325d, 330d, 335d, M3
+3 Series | F30/F31/F34 | 2012-2019 | 316i, 318i, 320i, 328i, 330i, 335i, 340i, 330e, 316d, 318d, 320d, 325d, 330d, 335d
+3 Series | G20/G21 | 2019-2026 | 318i, 320i, 330i, M340i, 330e, 316d, 318d, 320d, 330d, M340d
+4 Series | F32/F33/F36 | 2013-2020 | 418i, 420i, 428i, 430i, 435i, 440i, 418d, 420d, 425d, 430d, 435d, M4
+4 Series | G22/G23/G26 | 2020-2026 | 420i, 430i, M440i, 420d, 430d, M4, i4
+5 Series | E39 | 1995-2004 | 520i, 523i, 525i, 528i, 530i, 535i, 540i, 520d, 525d, 525tds, 530d, M5
+5 Series | E60/E61 | 2003-2010 | 520i, 523i, 525i, 530i, 540i, 545i, 550i, 520d, 525d, 530d, 535d, M5
+5 Series | F10/F11 | 2010-2017 | 520i, 523i, 528i, 530i, 535i, 550i, 518d, 520d, 525d, 530d, 535d, M550d, M5
+5 Series | G30/G31 | 2017-2023 | 520i, 530i, 540i, M550i, 530e, 518d, 520d, 525d, 530d, 540d, M5
+5 Series | G60/G61 | 2023-2026 | 520i, 530e, 550e, 520d, i5
+6 Series | E63/E64 | 2003-2010 | 630i, 645Ci, 650i, 635d, M6
+6 Series | F06/F12/F13 | 2011-2018 | 640i, 650i, 640d, M6
+7 Series | E65/E66 | 2001-2008 | 730i, 735i, 740i, 745i, 750i, 760i, 730d, 745d
+7 Series | F01/F02 | 2008-2015 | 730i, 740i, 750i, 760i, 730d, 740d, 750d
+7 Series | G11/G12 | 2015-2022 | 730i, 740i, 750i, 745e, 730d, 740d, 750d
+X1 | E84 | 2009-2015 | sDrive18i, sDrive20i, xDrive28i, 16d, 18d, 20d, 23d, 25d
+X1 | F48 | 2015-2022 | sDrive18i, sDrive20i, xDrive25i, xDrive25e, 16d, 18d, 20d, 25d
+X1 | U11 | 2022-2026 | sDrive18i, xDrive23i, xDrive30e, 18d, 20d, 23d, iX1
+X2 | F39 | 2018-2023 | sDrive18i, sDrive20i, M35i, 25e, 18d, 20d, 25d
+X2 | U10 | 2023-2026 | sDrive20i, M35i, 18d, 20d, iX2
+X3 | E83 | 2003-2010 | 2.0i, 2.5i, 3.0i, 2.0d, 3.0d, 3.0sd
+X3 | F25 | 2010-2017 | xDrive20i, xDrive28i, xDrive35i, 18d, 20d, 30d, 35d
+X3 | G01 | 2017-2024 | xDrive20i, xDrive30i, M40i, 30e, 18d, 20d, 30d, M40d, X3 M
+X3 | G45 | 2024-2026 | 20, 30e, M50, 20d
+X4 | F26 | 2014-2018 | xDrive20i, xDrive28i, 35i, 20d, 30d, 35d
+X4 | G02 | 2018-2026 | xDrive20i, xDrive30i, M40i, 20d, 30d, M40d
+X5 | E53 | 1999-2006 | 3.0i, 4.4i, 4.6is, 4.8is, 3.0d
+X5 | E70 | 2006-2013 | 3.0si, xDrive30i, xDrive35i, 4.8i, xDrive50i, 3.0d, xDrive30d, xDrive40d, M50d
+X5 | F15 | 2013-2018 | xDrive35i, xDrive50i, xDrive40e, 25d, 30d, 40d, M50d
+X5 | G05 | 2018-2026 | xDrive40i, M50i, M60i, xDrive45e, xDrive50e, 25d, 30d, 40d, M50d
+X6 | E71 | 2008-2014 | xDrive35i, xDrive50i, 30d, 35d, 40d, M50d
+X6 | F16 | 2014-2019 | xDrive35i, xDrive50i, 30d, 40d, M50d
+X6 | G06 | 2019-2026 | xDrive40i, M50i, M60i, 30d, 40d
+i3 | I01 | 2013-2022 | i3, i3s, REx
+iX | I20 | 2021-2026 | xDrive40, xDrive45, xDrive50, M60
+
+# BYD
+Atto 3 | 1st gen | 2022-2026 | 60 kWh
+Dolphin | 1st gen | 2023-2026 | 45 kWh, 60 kWh
+Seal | 1st gen | 2023-2026 | RWD, AWD
+Seal U | 1st gen | 2024-2026 | EV, DM-i
+
+# Citroën
+Berlingo | B9 | 2008-2018 | 1.6 VTi, 1.6 HDi, 1.6 BlueHDi
+Berlingo | K9 | 2018-2026 | 1.2 PureTech, 1.5 BlueHDi, ë-Berlingo
+C1 | 1st gen | 2005-2014 | 1.0, 1.4 HDi
+C1 | 2nd gen | 2014-2022 | 1.0 VTi, 1.2 PureTech
+C3 | 2nd gen | 2009-2016 | 1.0 VTi, 1.2 PureTech, 1.4 VTi, 1.6 VTi, 1.4 HDi, 1.6 HDi, 1.6 BlueHDi
+C3 | 3rd gen | 2016-2024 | 1.2 PureTech 83, 1.2 PureTech 110, 1.5 BlueHDi, 1.6 BlueHDi
+C3 | 4th gen | 2024-2026 | 1.2 Turbo 100, 1.2 Hybrid, ë-C3
+C3 Aircross | 1st gen | 2017-2024 | 1.2 PureTech, 1.5 BlueHDi, 1.6 BlueHDi
+C4 | 2nd gen | 2010-2018 | 1.2 PureTech, 1.6 VTi, 1.6 THP, 1.6 HDi, 1.6 BlueHDi, 2.0 HDi
+C4 | 3rd gen | 2020-2026 | 1.2 PureTech, 1.5 BlueHDi, ë-C4
+C4 Picasso / SpaceTourer | 2nd gen | 2013-2022 | 1.2 PureTech, 1.6 THP, 1.6 BlueHDi, 2.0 BlueHDi
+C4 Picasso | 1st gen | 2006-2013 | 1.6 VTi, 1.8, 2.0, 1.6 HDi, 2.0 HDi
+C5 | 2nd gen | 2008-2017 | 1.6 THP, 1.8, 2.0, 1.6 HDi, 2.0 HDi, 2.2 HDi
+C5 Aircross | 1st gen | 2018-2026 | 1.2 PureTech, 1.6 PureTech, 1.5 BlueHDi, 2.0 BlueHDi, Hybrid 225
+C-Elysée | 1st gen | 2012-2020 | 1.2 VTi, 1.6 VTi, 1.6 HDi, 1.6 BlueHDi
+Xsara Picasso | N68 | 1999-2012 | 1.6, 1.8, 2.0, 1.6 HDi, 2.0 HDi
+
+# Cupra
+Born | 1st gen | 2021-2026 | 58 kWh, 77 kWh
+Formentor | KM | 2020-2026 | 1.5 TSI, 2.0 TSI 245, 2.0 TSI 310, 1.4 e-Hybrid, 1.5 e-Hybrid, 2.0 TDI
+León | KL | 2020-2026 | 1.5 TSI, 2.0 TSI 245, 2.0 TSI 300, 1.4 e-Hybrid, 1.5 e-Hybrid
+Ateca | KH | 2018-2026 | 2.0 TSI 300
+Terramar | 1st gen | 2024-2026 | 1.5 TSI, 2.0 TSI, 1.5 e-Hybrid
+
+# Dacia
+Duster | 1st gen | 2010-2017 | 1.6 16V, 1.2 TCe, 1.5 dCi
+Duster | 2nd gen | 2017-2024 | 1.0 TCe, 1.3 TCe, 1.6 SCe, 1.5 dCi / Blue dCi, ECO-G
+Duster | 3rd gen | 2024-2026 | TCe 130, Hybrid 140, ECO-G 100
+Jogger | 1st gen | 2022-2026 | TCe 110, ECO-G 100, Hybrid 140
+Logan | 2nd gen | 2012-2020 | 1.0 SCe, 0.9 TCe, 1.5 dCi
+Logan | 3rd gen | 2020-2026 | 1.0 SCe, 1.0 TCe, ECO-G
+Sandero | 1st gen | 2008-2012 | 1.2, 1.4, 1.6, 1.5 dCi
+Sandero | 2nd gen | 2012-2020 | 1.0 SCe, 0.9 TCe, 1.2, 1.5 dCi
+Sandero / Stepway | 3rd gen | 2020-2026 | 1.0 SCe, 1.0 TCe 90, 1.0 TCe 110, ECO-G
+Spring | 1st gen | 2021-2026 | 45, 65
+Lodgy | 1st gen | 2012-2022 | 1.6, 1.2 TCe, 1.3 TCe, 1.5 dCi
+Dokker | 1st gen | 2012-2021 | 1.6, 1.2 TCe, 1.5 dCi
+
+# DS
+DS 3 / DS 3 Crossback | 1st gen | 2010-2019 | 1.2 PureTech, 1.6 THP, 1.6 HDi, 1.6 BlueHDi
+DS 3 Crossback | 2nd gen | 2019-2026 | 1.2 PureTech, 1.5 BlueHDi, E-Tense
+DS 4 | 1st gen | 2011-2018 | 1.6 THP, 1.6 BlueHDi, 2.0 BlueHDi
+DS 4 | 2nd gen | 2021-2026 | 1.2 PureTech, 1.6 PureTech, 1.5 BlueHDi, E-Tense
+DS 7 | 1st gen | 2017-2026 | 1.2 PureTech, 1.6 PureTech, 1.5 BlueHDi, 2.0 BlueHDi, E-Tense
+
+# Fiat
+500 | 312 | 2007-2024 | 0.9 TwinAir, 1.0 Hybrid, 1.2, 1.4, 1.3 Multijet, Abarth 1.4 T-Jet
+500 | 332 (electric) | 2020-2026 | 24 kWh, 42 kWh
+500X | 334 | 2014-2026 | 1.0 FireFly, 1.3 FireFly, 1.4 MultiAir, 1.6 E-torQ, 1.3 Multijet, 1.6 Multijet, 2.0 Multijet
+500L | 330 | 2012-2022 | 0.9 TwinAir, 1.4, 1.4 T-Jet, 1.3 Multijet, 1.6 Multijet
+Doblò | 263 | 2010-2022 | 1.4, 1.4 T-Jet, 1.3 Multijet, 1.6 Multijet, 2.0 Multijet
+Doblò | K9 | 2022-2026 | 1.2 PureTech, 1.5 BlueHDi, E-Doblò
+Panda | 169 | 2003-2012 | 1.1, 1.2, 1.4, 1.3 Multijet
+Panda | 319 | 2012-2026 | 0.9 TwinAir, 1.0 Hybrid, 1.2, 1.3 Multijet
+Punto | 199 (Grande Punto / Evo) | 2005-2018 | 1.2, 1.4, 1.4 MultiAir, 1.3 Multijet, 1.6 Multijet
+Tipo | 356 | 2015-2026 | 1.0 FireFly, 1.4, 1.6 E-torQ, 1.5 Hybrid, 1.3 Multijet, 1.6 Multijet
+Ducato | 250/290 | 2006-2026 | 2.0 Multijet, 2.2 Multijet, 2.3 Multijet, 3.0 Multijet
+
+# Ford
+Fiesta | Mk6 | 2002-2008 | 1.25, 1.3, 1.4, 1.6, 2.0 ST, 1.4 TDCi, 1.6 TDCi
+Fiesta | Mk7 | 2008-2017 | 1.0 EcoBoost, 1.25, 1.4, 1.6, 1.6 ST, 1.4 TDCi, 1.5 TDCi, 1.6 TDCi
+Fiesta | Mk8 | 2017-2023 | 1.0 EcoBoost, 1.0 mHEV, 1.1, 1.5 ST, 1.5 TDCi
+Focus | Mk1 | 1998-2004 | 1.4, 1.6, 1.8, 2.0, ST170, RS, 1.8 TDCi
+Focus | Mk2 | 2004-2011 | 1.4, 1.6, 1.8, 2.0, 2.5 ST, 2.5 RS, 1.6 TDCi, 1.8 TDCi, 2.0 TDCi
+Focus | Mk3 | 2011-2018 | 1.0 EcoBoost, 1.5 EcoBoost, 1.6, 1.6 EcoBoost, 2.0 ST, 2.3 RS, 1.5 TDCi, 1.6 TDCi, 2.0 TDCi
+Focus | Mk4 | 2018-2025 | 1.0 EcoBoost, 1.0 mHEV, 1.5 EcoBoost, 2.3 ST, 1.5 EcoBlue, 2.0 EcoBlue
+Kuga | Mk1 | 2008-2012 | 2.5, 2.0 TDCi
+Kuga | Mk2 | 2012-2019 | 1.5 EcoBoost, 1.6 EcoBoost, 2.0 EcoBoost, 1.5 TDCi, 2.0 TDCi
+Kuga | Mk3 | 2019-2026 | 1.5 EcoBoost, 2.5 FHEV, 2.5 PHEV, 1.5 EcoBlue, 2.0 EcoBlue
+Puma | J2K | 2019-2026 | 1.0 EcoBoost, 1.0 mHEV, 1.5 ST, Gen-E
+EcoSport | B515 | 2013-2022 | 1.0 EcoBoost, 1.5, 1.5 TDCi
+Mondeo | Mk3 | 2000-2007 | 1.8, 2.0, 2.5 V6, 3.0 ST220, 2.0 TDCi, 2.2 TDCi
+Mondeo | Mk4 | 2007-2014 | 1.6, 2.0, 2.0 EcoBoost, 2.3, 1.6 TDCi, 1.8 TDCi, 2.0 TDCi, 2.2 TDCi
+Mondeo | Mk5 | 2014-2022 | 1.5 EcoBoost, 2.0 EcoBoost, 2.0 Hybrid, 1.5 TDCi, 1.6 TDCi, 2.0 TDCi
+C-Max | Mk1 | 2003-2010 | 1.6, 1.8, 2.0, 1.6 TDCi, 2.0 TDCi
+C-Max | Mk2 | 2010-2019 | 1.0 EcoBoost, 1.6, 1.6 EcoBoost, 1.5 TDCi, 1.6 TDCi, 2.0 TDCi
+S-Max | Mk1 | 2006-2015 | 2.0, 2.0 EcoBoost, 2.5, 1.8 TDCi, 2.0 TDCi
+S-Max / Galaxy | Mk2 | 2015-2023 | 1.5 EcoBoost, 2.0 EcoBoost, 2.5 FHEV, 2.0 TDCi
+Ranger | T6 | 2011-2022 | 2.2 TDCi, 3.2 TDCi, 2.0 EcoBlue
+Ranger | T6.2 | 2022-2026 | 2.0 EcoBlue, 3.0 V6, 2.3 PHEV
+Transit Custom | 1st gen | 2012-2023 | 2.2 TDCi, 2.0 EcoBlue, PHEV
+Transit Custom | 2nd gen | 2023-2026 | 2.0 EcoBlue, PHEV, E-Transit Custom
+Transit | Mk7/Mk8 | 2006-2026 | 2.2 TDCi, 2.4 TDCi, 2.0 EcoBlue, E-Transit
+Mustang | S550 | 2015-2023 | 2.3 EcoBoost, 5.0 V8
+Mustang | S650 | 2023-2026 | 5.0 V8
+Mustang Mach-E | 1st gen | 2020-2026 | Standard Range, Extended Range, GT
+
+# Honda
+Civic | 8th gen (FK/FN) | 2005-2011 | 1.4, 1.8, 2.0 Type R, 2.2 i-CTDi
+Civic | 9th gen (FK) | 2011-2017 | 1.4, 1.8, 2.0 Type R, 1.6 i-DTEC, 2.2 i-DTEC
+Civic | 10th gen (FK7/FK8) | 2017-2022 | 1.0 VTEC Turbo, 1.5 VTEC Turbo, 2.0 Type R, 1.6 i-DTEC
+Civic | 11th gen (FL) | 2022-2026 | 2.0 e:HEV, 2.0 Type R
+CR-V | 3rd gen | 2006-2012 | 2.0, 2.4, 2.2 i-CTDi, 2.2 i-DTEC
+CR-V | 4th gen | 2012-2018 | 2.0, 1.6 i-DTEC, 2.2 i-DTEC
+CR-V | 5th gen | 2018-2023 | 1.5 VTEC Turbo, 2.0 Hybrid
+CR-V | 6th gen | 2023-2026 | 2.0 e:HEV, 2.0 e:PHEV
+HR-V | 2nd gen | 2015-2021 | 1.5, 1.5 Turbo, 1.6 i-DTEC
+HR-V | 3rd gen | 2021-2026 | 1.5 e:HEV
+Jazz | 3rd gen (GK) | 2015-2020 | 1.3, 1.5
+Jazz | 4th gen (GR) | 2020-2026 | 1.5 e:HEV
+Accord | 8th gen | 2008-2015 | 2.0, 2.4, 2.2 i-DTEC
+
+# Hyundai
+i10 | PA | 2008-2013 | 1.0, 1.1, 1.2
+i10 | IA | 2013-2019 | 1.0, 1.2
+i10 | AC3 | 2019-2026 | 1.0, 1.0 T-GDi, 1.2
+i20 | PB | 2008-2014 | 1.2, 1.4, 1.1 CRDi, 1.4 CRDi
+i20 | GB | 2014-2020 | 1.0 T-GDi, 1.2, 1.4, 1.1 CRDi, 1.4 CRDi
+i20 | BC3 | 2020-2026 | 1.0 T-GDi, 1.0 T-GDi 48V, 1.2, 1.6 T-GDi N
+i30 | FD | 2007-2012 | 1.4, 1.6, 2.0, 1.6 CRDi, 2.0 CRDi
+i30 | GD | 2012-2017 | 1.4, 1.6, 1.6 T-GDi, 1.4 CRDi, 1.6 CRDi
+i30 | PD | 2017-2026 | 1.0 T-GDi, 1.4 T-GDi, 1.5 T-GDi, 2.0 T-GDi N, 1.6 CRDi
+i40 | VF | 2011-2019 | 1.6, 2.0, 1.7 CRDi
+Bayon | BC3 CUV | 2021-2026 | 1.0 T-GDi, 1.2
+Kona | OS | 2017-2023 | 1.0 T-GDi, 1.6 T-GDi, 1.6 Hybrid, 1.6 CRDi, Electric
+Kona | SX2 | 2023-2026 | 1.0 T-GDi, 1.6 Hybrid, Electric
+ix35 | LM | 2010-2015 | 1.6, 2.0, 1.7 CRDi, 2.0 CRDi
+Tucson | JM | 2004-2010 | 2.0, 2.7 V6, 2.0 CRDi
+Tucson | TL | 2015-2020 | 1.6 GDi, 1.6 T-GDi, 1.7 CRDi, 2.0 CRDi
+Tucson | NX4 | 2020-2026 | 1.6 T-GDi, 1.6 T-GDi 48V, 1.6 HEV, 1.6 PHEV, 1.6 CRDi
+Santa Fe | CM | 2006-2012 | 2.4, 2.7 V6, 2.2 CRDi
+Santa Fe | DM | 2012-2018 | 2.4, 2.0 CRDi, 2.2 CRDi
+Santa Fe | TM | 2018-2024 | 2.4, 1.6 HEV, 1.6 PHEV, 2.0 CRDi, 2.2 CRDi
+Santa Fe | MX5 | 2024-2026 | 1.6 HEV, 1.6 PHEV
+IONIQ | AE | 2016-2022 | Hybrid, Plug-in, Electric
+IONIQ 5 | NE | 2021-2026 | 58 kWh, 63 kWh, 72.6 kWh, 77.4 kWh, 84 kWh, N
+
+# Jaguar
+E-Pace | X540 | 2017-2026 | P200, P250, P300e, D150, D165, D180, D200
+F-Pace | X761 | 2016-2026 | P250, P300, P400, P400e, D180, D200, D300, SVR
+XE | X760 | 2015-2024 | 2.0 P250, 2.0 P300, 2.0 D180, 2.0 D200
+XF | X250 | 2008-2015 | 2.2 D, 3.0 D, 3.0 V6, 5.0 V8
+XF | X260 | 2015-2024 | 2.0 P250, 2.0 P300, 2.0 D180, 2.0 D200, 3.0 D
+
+# Jeep
+Avenger | 1st gen | 2023-2026 | 1.2 Turbo, 1.2 e-Hybrid, Electric
+Compass | MK49 | 2007-2016 | 2.0, 2.4, 2.2 CRD
+Compass | MP | 2017-2026 | 1.3 T4, 1.4 MultiAir, 1.3 4xe, 1.5 e-Hybrid, 1.6 Multijet, 2.0 Multijet
+Renegade | BU | 2014-2026 | 1.0 T3, 1.3 T4, 1.4 MultiAir, 1.3 4xe, 1.5 e-Hybrid, 1.6 Multijet, 2.0 Multijet
+Wrangler | JK | 2007-2018 | 3.6 V6, 2.8 CRD
+Wrangler | JL | 2018-2026 | 2.0 Turbo, 2.0 4xe, 2.2 CRD
+Grand Cherokee | WK2 | 2010-2021 | 3.6 V6, 5.7 V8, 3.0 CRD
+Grand Cherokee | WL | 2021-2026 | 2.0 4xe
+
+# Kia
+Ceed | ED | 2006-2012 | 1.4, 1.6, 2.0, 1.6 CRDi, 2.0 CRDi
+Ceed | JD | 2012-2018 | 1.0 T-GDi, 1.4, 1.6, 1.6 T-GDi GT, 1.4 CRDi, 1.6 CRDi
+Ceed | CD | 2018-2026 | 1.0 T-GDi, 1.4 T-GDi, 1.5 T-GDi, 1.6 T-GDi GT, 1.6 PHEV, 1.6 CRDi
+Picanto | SA | 2004-2011 | 1.0, 1.1
+Picanto | TA | 2011-2017 | 1.0, 1.2
+Picanto | JA | 2017-2026 | 1.0, 1.0 T-GDi, 1.2
+Rio | UB | 2011-2017 | 1.2, 1.4, 1.1 CRDi, 1.4 CRDi
+Rio | YB | 2017-2023 | 1.0 T-GDi, 1.2, 1.4, 1.4 CRDi
+Stonic | YB CUV | 2017-2026 | 1.0 T-GDi, 1.0 T-GDi 48V, 1.2, 1.4, 1.6 CRDi
+Niro | DE | 2016-2022 | 1.6 HEV, 1.6 PHEV, e-Niro
+Niro | SG2 | 2022-2026 | 1.6 HEV, 1.6 PHEV, EV
+Sportage | SL | 2010-2015 | 1.6 GDi, 2.0, 1.7 CRDi, 2.0 CRDi
+Sportage | QL | 2015-2021 | 1.6 GDi, 1.6 T-GDi, 1.6 CRDi, 1.7 CRDi, 2.0 CRDi
+Sportage | NQ5 | 2021-2026 | 1.6 T-GDi, 1.6 T-GDi 48V, 1.6 HEV, 1.6 PHEV, 1.6 CRDi
+Sorento | UM | 2015-2020 | 2.0 CRDi, 2.2 CRDi, 2.4 GDi
+Sorento | MQ4 | 2020-2026 | 1.6 HEV, 1.6 PHEV, 2.2 CRDi
+XCeed | CD CUV | 2019-2026 | 1.0 T-GDi, 1.4 T-GDi, 1.5 T-GDi, 1.6 T-GDi, 1.6 PHEV, 1.6 CRDi
+EV6 | CV | 2021-2026 | 58 kWh, 77.4 kWh, 84 kWh, GT
+
+# Land Rover
+Defender | L663 | 2020-2026 | P300, P400, P525 V8, P400e, D200, D250, D300
+Discovery | L462 | 2017-2026 | P300, P360, D250, D300
+Discovery Sport | L550 | 2014-2026 | P200, P250, P300e, D150, D165, D180, D200
+Range Rover | L322 | 2002-2012 | 4.4 V8, 5.0 V8, 3.0 TD6, 3.6 TDV8, 4.4 TDV8
+Range Rover | L405 | 2012-2021 | 3.0 V6, 5.0 V8, P400e, 3.0 TDV6, 4.4 SDV8
+Range Rover | L460 | 2022-2026 | P400, P440e, P530, D300, D350
+Range Rover Evoque | L538 | 2011-2018 | Si4 2.0, TD4 2.0, eD4, 2.2 SD4, 2.2 TD4
+Range Rover Evoque | L551 | 2019-2026 | P200, P250, P300e, D150, D165, D200
+Range Rover Sport | L320 | 2005-2013 | 4.2 V8 SC, 5.0 V8, 2.7 TDV6, 3.0 TDV6, 3.6 TDV8
+Range Rover Sport | L494 | 2013-2022 | 3.0 V6, 5.0 V8, P400e, 3.0 TDV6, 3.0 SDV6, 4.4 SDV8
+Range Rover Sport | L461 | 2022-2026 | P400, P460e, P530, D300
+Range Rover Velar | L560 | 2017-2026 | P250, P300, P400e, D200, D300
+
+# Lexus
+CT | 200h | 2011-2022 | 1.8 Hybrid
+IS | XE30 | 2013-2026 | 300h, 200t, 350
+NX | AZ10 | 2014-2021 | 300h, 200t
+NX | AZ20 | 2021-2026 | 350h, 450h+
+RX | AL20 | 2015-2022 | 450h, 200t
+RX | ALH10 | 2022-2026 | 350h, 450h+, 500h
+UX | ZA10 | 2018-2026 | 250h, 300h, 300e
+
+# Mazda
+2 | DE | 2007-2014 | 1.3, 1.5, 1.4 CD, 1.6 CD
+2 | DJ | 2014-2026 | 1.5 Skyactiv-G, 1.5 Skyactiv-D, 2 Hybrid
+3 | BK | 2003-2009 | 1.4, 1.6, 2.0, 2.3 MPS, 1.6 CD, 2.0 CD
+3 | BL | 2009-2013 | 1.6, 2.0, 2.3 MPS, 1.6 CD, 2.2 CD
+3 | BM/BN | 2013-2019 | 1.5 Skyactiv-G, 2.0 Skyactiv-G, 1.5 Skyactiv-D, 2.2 Skyactiv-D
+3 | BP | 2019-2026 | 2.0 Skyactiv-G, 2.5 e-Skyactiv G, 2.0 Skyactiv-X, 1.8 Skyactiv-D
+6 | GH | 2008-2012 | 1.8, 2.0, 2.5, 2.0 CD, 2.2 CD
+6 | GJ/GL | 2012-2024 | 2.0 Skyactiv-G, 2.5 Skyactiv-G, 2.2 Skyactiv-D
+CX-3 | DK | 2015-2022 | 1.8 Skyactiv-D, 2.0 Skyactiv-G, 1.5 Skyactiv-D
+CX-30 | DM | 2019-2026 | 2.0 Skyactiv-G, 2.5 e-Skyactiv G, 2.0 Skyactiv-X, 1.8 Skyactiv-D
+CX-5 | KE | 2012-2017 | 2.0 Skyactiv-G, 2.5 Skyactiv-G, 2.2 Skyactiv-D
+CX-5 | KF | 2017-2026 | 2.0 Skyactiv-G, 2.5 Skyactiv-G, 2.2 Skyactiv-D
+CX-60 | KH | 2022-2026 | 2.5 PHEV, 3.3 e-Skyactiv D
+MX-5 | NC | 2005-2015 | 1.8, 2.0
+MX-5 | ND | 2015-2026 | 1.5 Skyactiv-G, 2.0 Skyactiv-G
+
+# Mercedes-Benz
+A-Class | W168 | 1997-2004 | A140, A160, A190, A210, A160 CDI, A170 CDI
+A-Class | W169 | 2004-2012 | A150, A160, A170, A180, A200, A200 Turbo, A160 CDI, A180 CDI, A200 CDI
+A-Class | W176 | 2012-2018 | A160, A180, A200, A220, A250, A45 AMG, A160 CDI/d, A180 CDI/d, A200 CDI/d, A220 CDI/d
+A-Class | W177 | 2018-2026 | A180, A200, A220, A250, A250e, A35 AMG, A45 AMG, A180d, A200d, A220d
+B-Class | W245 | 2005-2011 | B150, B170, B180, B200, B200 Turbo, B180 CDI, B200 CDI
+B-Class | W246 | 2011-2018 | B160, B180, B200, B220, B250, B160 CDI/d, B180 CDI/d, B200 CDI/d, B220 CDI/d
+B-Class | W247 | 2018-2026 | B180, B200, B250e, B180d, B200d, B220d
+C-Class | W203 | 2000-2007 | C180, C180 Kompressor, C200 Kompressor, C230, C240, C280, C320, C200 CDI, C220 CDI, C270 CDI, C320 CDI
+C-Class | W204 | 2007-2014 | C180, C200, C230, C250, C280, C300, C350, C63 AMG, C180 CDI, C200 CDI, C220 CDI, C250 CDI, C320 CDI, C350 CDI
+C-Class | W205 | 2014-2021 | C160, C180, C200, C250, C300, C350e, C43 AMG, C63 AMG, C180d, C200d, C220d, C250d, C300d
+C-Class | W206 | 2021-2026 | C180, C200, C300, C300e, C43 AMG, C63 AMG, C200d, C220d, C300d
+CLA | C117 | 2013-2019 | CLA180, CLA200, CLA220, CLA250, CLA45 AMG, CLA180d, CLA200d, CLA220d
+CLA | C118 | 2019-2026 | CLA180, CLA200, CLA220, CLA250, CLA250e, CLA35 AMG, CLA45 AMG, CLA180d, CLA200d, CLA220d
+CLS | C219 | 2004-2010 | CLS 280, CLS 350, CLS 500, CLS 320 CDI, CLS 350 CDI
+CLS | C218 | 2011-2017 | CLS 350, CLS 500, CLS 63 AMG, CLS 220d, CLS 250 CDI, CLS 350 CDI/d
+CLS | C257 | 2018-2023 | CLS 350, CLS 450, CLS 53 AMG, CLS 220d, CLS 300d, CLS 400d
+E-Class | W210 | 1995-2002 | E200, E230, E240, E280, E320, E430, E200 CDI, E220 CDI, E270 CDI, E290 TD, E300 TD
+E-Class | W211 | 2002-2009 | E200 Kompressor, E240, E280, E320, E350, E500, E200 CDI, E220 CDI, E270 CDI, E280 CDI, E320 CDI
+E-Class | W212 | 2009-2016 | E200, E250, E300, E350, E400, E500, E63 AMG, E200 CDI, E220 CDI/d, E250 CDI, E300 BlueTEC Hybrid, E350 CDI/BlueTEC
+E-Class | W213 | 2016-2023 | E200, E300, E350, E300e, E450, E53 AMG, E63 AMG, E200d, E220d, E300d, E300de, E350d, E400d
+E-Class | W214 | 2023-2026 | E200, E300e, E220d, E300de, E400e
+S-Class | W221 | 2005-2013 | S350, S400 Hybrid, S500, S600, S63 AMG, S320 CDI, S350 CDI
+S-Class | W222 | 2013-2020 | S350, S400, S450, S500, S560, S500e, S63 AMG, S350d, S400d
+S-Class | W223 | 2020-2026 | S450, S500, S580, S580e, S350d, S400d
+GLA | X156 | 2014-2019 | GLA180, GLA200, GLA250, GLA45 AMG, GLA180d, GLA200d, GLA220d
+GLA | H247 | 2020-2026 | GLA200, GLA250, GLA250e, GLA35 AMG, GLA45 AMG, GLA180d, GLA200d, GLA220d
+GLB | X247 | 2019-2026 | GLB200, GLB250, GLB35 AMG, GLB180d, GLB200d, GLB220d
+GLC | X253/C253 | 2015-2022 | GLC200, GLC250, GLC300, GLC300e, GLC43 AMG, GLC63 AMG, GLC200d, GLC220d, GLC250d, GLC300d
+GLC | X254/C254 | 2022-2026 | GLC200, GLC300, GLC300e, GLC400e, GLC220d, GLC300d
+GLE / ML | W163 (ML) | 1997-2005 | ML230, ML320, ML350, ML430, ML500, ML270 CDI, ML400 CDI
+GLE / ML | W164 (ML) | 2005-2011 | ML280 CDI, ML300 CDI, ML320 CDI, ML350 CDI, ML350, ML500, ML63 AMG
+GLE / ML | W166 (ML/GLE) | 2011-2019 | ML250 BlueTEC, ML350 BlueTEC, ML350, GLE250d, GLE350d, GLE400, GLE500e, GLE43 AMG, GLE63 AMG
+GLE / ML | V167 (GLE) | 2019-2026 | GLE300d, GLE350d, GLE350de, GLE400d, GLE400e, GLE450, GLE53 AMG, GLE63 AMG
+Vito / V-Class | W639 | 2003-2014 | 109 CDI, 111 CDI, 113 CDI, 115 CDI, 116 CDI, 120 CDI, 122 CDI
+Vito / V-Class | W447 | 2014-2026 | 109 CDI, 111 CDI, 114 CDI, 116 CDI, 119 CDI, V220d, V250d, V300d, eVito
+Sprinter | W906 | 2006-2018 | 209 CDI, 211 CDI, 213 CDI, 216 CDI, 313 CDI, 316 CDI, 318 CDI, 513 CDI, 516 CDI
+Sprinter | W907 | 2018-2026 | 211 CDI, 214 CDI, 311 CDI, 314 CDI, 316 CDI, 319 CDI, 514 CDI, 516 CDI, eSprinter
+
+# MG
+MG3 | 1st gen | 2013-2024 | 1.5 VTi-Tech
+MG3 | 2nd gen | 2024-2026 | 1.5 Hybrid+
+MG4 | EH32 | 2022-2026 | Standard, Comfort, Luxury, XPOWER
+MG5 | EP | 2020-2026 | Standard Range, Long Range
+ZS | 1st gen | 2017-2024 | 1.0 T-GDI, 1.5 VTi-Tech, EV
+ZS | 2nd gen | 2024-2026 | 1.5 Hybrid+, EV
+HS | 1st gen | 2019-2024 | 1.5 T-GDI, 1.5 PHEV
+HS | 2nd gen | 2024-2026 | 1.5 T-GDI, 1.5 PHEV
+
+# MINI
+Cooper / Hatch | R50/R53 | 2001-2006 | One, Cooper, Cooper S, One D
+Cooper / Hatch | R56 | 2006-2013 | One, Cooper, Cooper S, JCW, One D, Cooper D, Cooper SD
+Cooper / Hatch | F55/F56/F57 | 2014-2024 | One, Cooper, Cooper S, JCW, Cooper SE, One D, Cooper D, Cooper SD
+Cooper / Hatch | F66/J01 | 2024-2026 | Cooper C, Cooper S, Cooper E, Cooper SE
+Clubman | R55 | 2007-2014 | One, Cooper, Cooper S, Cooper D, Cooper SD
+Clubman | F54 | 2015-2024 | One, Cooper, Cooper S, JCW, One D, Cooper D, Cooper SD
+Countryman | R60 | 2010-2016 | One, Cooper, Cooper S, JCW, One D, Cooper D, Cooper SD
+Countryman | F60 | 2017-2024 | One, Cooper, Cooper S, Cooper SE, JCW, One D, Cooper D, Cooper SD
+Countryman | U25 | 2024-2026 | C, S ALL4, JCW, D, E, SE
+Paceman | R61 | 2012-2016 | Cooper, Cooper S, Cooper D, Cooper SD
+
+# Mitsubishi
+ASX | GA | 2010-2022 | 1.6, 2.0, 1.6 DI-D, 1.8 DI-D, 2.2 DI-D
+ASX | 2nd gen | 2023-2026 | 1.0 Turbo, 1.3 Turbo mHEV, 1.6 HEV, 1.6 PHEV
+Colt | Z30 | 2004-2012 | 1.1, 1.3, 1.5, 1.5 Turbo, 1.5 DI-D
+Colt | 2023 | 2023-2026 | 1.0 Turbo, 1.6 HEV
+Eclipse Cross | GK | 2017-2026 | 1.5 T-MIVEC, 2.4 PHEV, 2.2 DI-D
+L200 | KB4T | 2005-2015 | 2.5 DI-D
+L200 | KJ/KK/KL | 2015-2026 | 2.2 DI-D, 2.4 DI-D
+Outlander | CW | 2007-2012 | 2.0, 2.4, 2.0 DI-D, 2.2 DI-D
+Outlander | GF/GG | 2012-2021 | 2.0, 2.4 PHEV, 2.0 PHEV, 2.2 DI-D
+Outlander | GN | 2021-2026 | 2.4 PHEV
+Space Star | A05A | 2013-2026 | 1.0, 1.2
+
+# Nissan
+Juke | F15 | 2010-2019 | 1.2 DIG-T, 1.6, 1.6 DIG-T, 1.5 dCi
+Juke | F16 | 2019-2026 | 1.0 DIG-T, 1.6 Hybrid
+Micra | K12 | 2003-2010 | 1.0, 1.2, 1.4, 1.6, 1.5 dCi
+Micra | K13 | 2010-2017 | 1.2, 1.2 DIG-S
+Micra | K14 | 2017-2023 | 0.9 IG-T, 1.0, 1.0 IG-T, 1.5 dCi
+Qashqai | J10 | 2007-2014 | 1.6, 2.0, 1.5 dCi, 1.6 dCi, 2.0 dCi
+Qashqai | J11 | 2014-2021 | 1.2 DIG-T, 1.3 DIG-T, 1.6 DIG-T, 1.5 dCi, 1.6 dCi, 1.7 dCi
+Qashqai | J12 | 2021-2026 | 1.3 DIG-T mHEV, 1.5 e-Power
+X-Trail | T31 | 2007-2014 | 2.0, 2.5, 2.0 dCi
+X-Trail | T32 | 2014-2022 | 1.3 DIG-T, 1.6 DIG-T, 1.6 dCi, 1.7 dCi, 2.0 dCi
+X-Trail | T33 | 2022-2026 | 1.5 VC-T mHEV, 1.5 e-Power, e-4ORCE
+Leaf | ZE0 | 2011-2017 | 24 kWh, 30 kWh
+Leaf | ZE1 | 2018-2025 | 40 kWh, 62 kWh e+
+Navara | D40 | 2005-2015 | 2.5 dCi, 3.0 V6 dCi
+Navara | D23 | 2015-2022 | 2.3 dCi
+Note | E11 | 2006-2013 | 1.4, 1.6, 1.5 dCi
+Note | E12 | 2013-2017 | 1.2, 1.2 DIG-S, 1.5 dCi
+Pulsar | C13 | 2014-2018 | 1.2 DIG-T, 1.6 DIG-T, 1.5 dCi
+
+# Opel
+Astra | G | 1998-2004 | 1.4, 1.6, 1.8, 2.0, 2.0 Turbo, 1.7 DTI, 2.0 DTI, 2.2 DTI
+Astra | H | 2004-2010 | 1.4, 1.6, 1.6 Turbo, 1.8, 2.0 Turbo, 1.3 CDTI, 1.7 CDTI, 1.9 CDTI
+Astra | J | 2009-2015 | 1.4, 1.4 Turbo, 1.6, 1.6 Turbo, 2.0 Turbo OPC, 1.3 CDTI, 1.6 CDTI, 1.7 CDTI, 2.0 CDTI
+Astra | K | 2015-2021 | 1.0 Turbo, 1.2 Turbo, 1.4 Turbo, 1.6 Turbo, 1.5 Diesel, 1.6 CDTI
+Astra | L | 2021-2026 | 1.2 Turbo, 1.6 PHEV, 1.5 Diesel, Astra Electric
+Corsa | C | 2000-2006 | 1.0, 1.2, 1.4, 1.8, 1.3 CDTI, 1.7 DI/DTI/CDTI
+Corsa | D | 2006-2014 | 1.0, 1.2, 1.4, 1.6 Turbo, 1.3 CDTI, 1.7 CDTI
+Corsa | E | 2014-2019 | 1.0 Turbo, 1.2, 1.4, 1.4 Turbo, 1.6 Turbo OPC, 1.3 CDTI
+Corsa | F | 2019-2026 | 1.2, 1.2 Turbo, 1.2 Hybrid, 1.5 Diesel, Corsa-e / Electric
+Crossland | P17 | 2017-2024 | 1.2, 1.2 Turbo, 1.5 Diesel, 1.6 Diesel
+Grandland | A18 | 2017-2024 | 1.2 Turbo, 1.6 Turbo PHEV, 1.5 Diesel, 1.6 Diesel, 2.0 Diesel
+Grandland | 2nd gen | 2024-2026 | 1.2 Hybrid, 1.6 PHEV, Electric
+Insignia | A | 2008-2017 | 1.4 Turbo, 1.6, 1.6 Turbo, 1.8, 2.0 Turbo, 2.8 V6 OPC, 1.6 CDTI, 2.0 CDTI
+Insignia | B | 2017-2022 | 1.5 Turbo, 1.6 Turbo, 2.0 Turbo, 1.5 Diesel, 1.6 CDTI, 2.0 CDTI
+Meriva | A | 2003-2010 | 1.4, 1.6, 1.8, 1.3 CDTI, 1.7 CDTI
+Meriva | B | 2010-2017 | 1.4, 1.4 Turbo, 1.3 CDTI, 1.6 CDTI, 1.7 CDTI
+Mokka | J13 (Mokka / Mokka X) | 2012-2019 | 1.4 Turbo, 1.6, 1.6 CDTI, 1.7 CDTI
+Mokka | B | 2020-2026 | 1.2 Turbo, 1.2 Hybrid, 1.5 Diesel, Mokka-e / Electric
+Zafira | B | 2005-2014 | 1.6, 1.8, 2.0 Turbo, 1.7 CDTI, 1.9 CDTI
+Zafira | C (Tourer) | 2011-2019 | 1.4 Turbo, 1.6 Turbo, 1.8, 1.6 CDTI, 2.0 CDTI
+Combo | D | 2011-2018 | 1.4, 1.4 Turbo, 1.3 CDTI, 1.6 CDTI, 2.0 CDTI
+Combo | E | 2018-2026 | 1.2 Turbo, 1.5 Diesel, Combo-e / Electric
+Vivaro | B | 2014-2019 | 1.6 CDTI
+Vivaro | C | 2019-2026 | 1.5 Diesel, 2.0 Diesel, Vivaro-e / Electric
+
+# Peugeot
+107 / 108 | 1st gen | 2005-2021 | 1.0, 1.2 PureTech, 1.4 HDi
+206 | T1 | 1998-2012 | 1.1, 1.4, 1.6, 2.0 GTI, 1.4 HDi, 1.6 HDi, 2.0 HDi
+207 | A7 | 2006-2014 | 1.4, 1.4 VTi, 1.6 VTi, 1.6 THP, 1.4 HDi, 1.6 HDi
+208 | A9 | 2012-2019 | 1.0 VTi, 1.2 PureTech, 1.6 VTi, 1.6 THP, 1.4 HDi, 1.6 HDi/BlueHDi
+208 | P21 | 2019-2026 | 1.2 PureTech 75, 1.2 PureTech 100, 1.2 PureTech 130, 1.2 Hybrid, 1.5 BlueHDi, e-208
+2008 | A94 | 2013-2019 | 1.2 PureTech, 1.6 VTi, 1.4 HDi, 1.6 BlueHDi
+2008 | P24 | 2019-2026 | 1.2 PureTech 100, 1.2 PureTech 130, 1.2 PureTech 155, 1.2 Hybrid, 1.5 BlueHDi, e-2008
+307 | T5/T6 | 2001-2008 | 1.4, 1.6, 2.0, 1.4 HDi, 1.6 HDi, 2.0 HDi
+308 | T7 | 2007-2013 | 1.4 VTi, 1.6 VTi, 1.6 THP, 1.6 HDi, 2.0 HDi
+308 | T9 | 2013-2021 | 1.2 PureTech, 1.6 THP, 1.6 GTi, 1.5 BlueHDi, 1.6 BlueHDi, 2.0 BlueHDi
+308 | P5 | 2021-2026 | 1.2 PureTech, 1.2 Hybrid, 1.6 PHEV, 1.5 BlueHDi, e-308
+3008 | T84 | 2009-2016 | 1.6 VTi, 1.6 THP, 1.6 HDi, 2.0 HDi, HYbrid4
+3008 | P84 | 2016-2024 | 1.2 PureTech, 1.6 THP, 1.6 PHEV, 1.5 BlueHDi, 1.6 BlueHDi, 2.0 BlueHDi
+3008 | P64 | 2024-2026 | 1.2 Hybrid, 1.6 PHEV, e-3008
+407 | 6D | 2004-2011 | 1.8, 2.0, 2.2, 3.0 V6, 1.6 HDi, 2.0 HDi, 2.2 HDi, 2.7 HDi
+508 | W2 | 2011-2018 | 1.6 THP, 1.6 VTi, 1.6 HDi, 2.0 HDi, 2.2 HDi, HYbrid4
+508 | R8 | 2018-2026 | 1.2 PureTech, 1.6 PureTech, 1.6 PHEV, 1.5 BlueHDi, 2.0 BlueHDi
+5008 | T87 | 2009-2016 | 1.6 VTi, 1.6 THP, 1.6 HDi, 2.0 HDi
+5008 | P87 | 2017-2024 | 1.2 PureTech, 1.6 THP, 1.5 BlueHDi, 1.6 BlueHDi, 2.0 BlueHDi
+5008 | P67 | 2024-2026 | 1.2 Hybrid, 1.6 PHEV, e-5008
+Partner / Rifter | B9 | 2008-2018 | 1.6 VTi, 1.6 HDi, 1.6 BlueHDi
+Partner / Rifter | K9 | 2018-2026 | 1.2 PureTech, 1.5 BlueHDi, e-Rifter
+Expert | K0 | 2016-2026 | 1.5 BlueHDi, 1.6 BlueHDi, 2.0 BlueHDi, e-Expert
+
+# Porsche
+911 | 996 | 1997-2005 | Carrera, Carrera 4, Turbo, GT3
+911 | 997 | 2004-2012 | Carrera, Carrera S, Carrera 4, Turbo, GT3
+911 | 991 | 2011-2019 | Carrera, Carrera S, Carrera 4, GTS, Turbo, GT3
+911 | 992 | 2019-2026 | Carrera, Carrera S, Carrera 4S, GTS, Turbo, GT3
+Cayenne | 9PA (955/957) | 2002-2010 | V6, S, GTS, Turbo, Diesel
+Cayenne | 92A (958) | 2010-2017 | V6, S, S E-Hybrid, GTS, Turbo, Diesel, S Diesel
+Cayenne | 9YA | 2017-2026 | Cayenne, S, E-Hybrid, GTS, Turbo, Turbo E-Hybrid
+Macan | 95B | 2014-2024 | 2.0, S, GTS, Turbo, S Diesel
+Macan | Electric | 2024-2026 | 4, 4S, Turbo
+Panamera | 970 | 2009-2016 | 3.6 V6, S, 4S, GTS, Turbo, Diesel, S E-Hybrid
+Panamera | 971 | 2016-2026 | Panamera, 4, 4S, 4 E-Hybrid, GTS, Turbo
+Taycan | J1 | 2019-2026 | Taycan, 4, 4S, GTS, Turbo, Turbo S
+
+# Renault
+Arkana | LJL | 2021-2026 | TCe 140 mHEV, TCe 160 mHEV, E-Tech 145 Hybrid
+Austral | 1st gen | 2022-2026 | 1.2 E-Tech Hybrid, 1.3 TCe mHEV
+Captur | J87 | 2013-2019 | 0.9 TCe, 1.2 TCe, 1.3 TCe, 1.5 dCi
+Captur | HJB | 2019-2026 | 1.0 TCe, 1.3 TCe, E-Tech Hybrid, E-Tech PHEV, 1.5 Blue dCi
+Clio | II | 1998-2012 | 1.2, 1.4, 1.6, 2.0 RS, 1.5 dCi
+Clio | III | 2005-2014 | 1.2, 1.2 TCe, 1.4, 1.6, 2.0 RS, 1.5 dCi
+Clio | IV | 2012-2019 | 0.9 TCe, 1.2, 1.2 TCe, 1.6 RS, 1.5 dCi
+Clio | V | 2019-2026 | 1.0 SCe, 1.0 TCe, 1.3 TCe, E-Tech Hybrid, 1.5 Blue dCi
+Kadjar | HA/HL | 2015-2022 | 1.2 TCe, 1.3 TCe, 1.6 TCe, 1.5 dCi, 1.6 dCi, 1.7 Blue dCi
+Koleos | HC | 2016-2023 | 1.3 TCe, 2.0 dCi, 1.7 Blue dCi
+Kangoo | II | 2008-2021 | 1.2 TCe, 1.6, 1.5 dCi, Z.E.
+Kangoo | III | 2021-2026 | 1.3 TCe, 1.5 Blue dCi, E-Tech Electric
+Laguna | III | 2007-2015 | 2.0, 2.0 TCe, 1.5 dCi, 2.0 dCi
+Mégane | II | 2002-2009 | 1.4, 1.6, 2.0, 2.0 RS, 1.5 dCi, 1.9 dCi
+Mégane | III | 2008-2016 | 1.2 TCe, 1.4 TCe, 1.6, 2.0, 2.0 RS, 1.5 dCi, 1.6 dCi, 1.9 dCi
+Mégane | IV | 2016-2024 | 1.2 TCe, 1.3 TCe, 1.6 TCe, 1.8 RS, E-Tech PHEV, 1.5 dCi, 1.6 dCi, 1.7 Blue dCi
+Mégane E-Tech | Electric | 2022-2026 | EV40, EV60
+Scénic | II | 2003-2009 | 1.4, 1.6, 2.0, 1.5 dCi, 1.9 dCi
+Scénic | III | 2009-2016 | 1.2 TCe, 1.4 TCe, 1.6, 1.5 dCi, 1.6 dCi, 1.9 dCi
+Scénic | IV | 2016-2022 | 1.2 TCe, 1.3 TCe, 1.5 dCi, 1.6 dCi, 1.7 Blue dCi
+Talisman | 1st gen | 2015-2022 | 1.3 TCe, 1.6 TCe, 1.8 TCe, 1.5 dCi, 1.6 dCi, 2.0 Blue dCi
+Trafic | III | 2014-2026 | 1.6 dCi, 2.0 dCi, 2.0 Blue dCi
+Twingo | II | 2007-2014 | 1.2, 1.2 TCe, 1.6 RS, 1.5 dCi
+Twingo | III | 2014-2024 | 1.0 SCe, 0.9 TCe, Electric
+Zoe | 1st gen | 2012-2024 | R90, R110, R135
+
+# SEAT
+Alhambra | 7M | 1996-2010 | 1.8T, 2.0, 2.8 V6, 1.9 TDI, 2.0 TDI
+Alhambra | 7N | 2010-2020 | 1.4 TSI, 2.0 TSI, 2.0 TDI
+Altea | 5P | 2004-2015 | 1.2 TSI, 1.4, 1.4 TSI, 1.6, 1.8 TSI, 2.0 FSI, 1.6 TDI, 1.9 TDI, 2.0 TDI
+Arona | KJ7 | 2017-2026 | 1.0 TSI 95, 1.0 TSI 110, 1.5 TSI, 1.6 TDI
+Ateca | 5FP | 2016-2026 | 1.0 TSI, 1.4 TSI, 1.5 TSI, 2.0 TSI, 1.6 TDI, 2.0 TDI
+Ibiza | 6L | 2002-2008 | 1.2, 1.4, 1.6, 1.8T Cupra, 1.4 TDI, 1.9 TDI, 1.9 SDI
+Ibiza | 6J | 2008-2017 | 1.0, 1.2, 1.2 TSI, 1.4, 1.4 TSI, 1.6, 1.8 TSI Cupra, 1.2 TDI, 1.4 TDI, 1.6 TDI, 1.9 TDI, 2.0 TDI
+Ibiza | KJ1 | 2017-2026 | 1.0 MPI, 1.0 TSI 95, 1.0 TSI 110, 1.5 TSI, 1.0 TGI, 1.6 TDI
+León | 1M | 1999-2005 | 1.4, 1.6, 1.8, 1.8T, 1.8T Cupra R, 1.9 TDI
+León | 1P | 2005-2012 | 1.2 TSI, 1.4, 1.4 TSI, 1.6, 1.8 TSI, 2.0 FSI, 2.0 TFSI, 1.6 TDI, 1.9 TDI, 2.0 TDI
+León | 5F | 2012-2020 | 1.0 TSI, 1.2 TSI, 1.4 TSI, 1.5 TSI, 1.8 TSI, 2.0 TSI Cupra, 1.4 TGI, 1.6 TDI, 2.0 TDI
+León | KL | 2020-2026 | 1.0 TSI, 1.0 eTSI, 1.5 TSI, 1.5 eTSI, 1.4 e-Hybrid, 1.5 e-Hybrid, 2.0 TDI
+Mii | KF1 | 2011-2021 | 1.0, Mii electric
+Tarraco | KN2 | 2018-2026 | 1.5 TSI, 2.0 TSI, 1.4 e-Hybrid, 2.0 TDI
+Toledo | 1M | 1999-2004 | 1.6, 1.8, 2.3 V5, 1.9 TDI
+Toledo | 5P | 2004-2009 | 1.6, 2.0 FSI, 1.9 TDI, 2.0 TDI
+Toledo | KG3 | 2012-2019 | 1.0 TSI, 1.2, 1.2 TSI, 1.4 TSI, 1.4 TDI, 1.6 TDI
+Exeo | 3R | 2008-2013 | 1.6, 1.8 TSI, 2.0 TSI, 2.0 TDI
+
+# Škoda
+Fabia | 6Y | 1999-2007 | 1.0, 1.2, 1.4, 2.0, 1.4 TDI, 1.9 TDI, 1.9 SDI
+Fabia | 5J | 2007-2014 | 1.2, 1.2 TSI, 1.4, 1.4 TSI RS, 1.6, 1.2 TDI, 1.4 TDI, 1.6 TDI, 1.9 TDI
+Fabia | NJ | 2014-2021 | 1.0 MPI, 1.0 TSI, 1.2 TSI, 1.4 TDI
+Fabia | PJ | 2021-2026 | 1.0 MPI, 1.0 TSI, 1.5 TSI
+Kamiq | NW4 | 2019-2026 | 1.0 TSI, 1.5 TSI, 1.6 TDI
+Karoq | NU7 | 2017-2026 | 1.0 TSI, 1.5 TSI, 2.0 TSI, 1.6 TDI, 2.0 TDI
+Kodiaq | NS7 | 2016-2024 | 1.4 TSI, 1.5 TSI, 2.0 TSI, 2.0 TDI, RS
+Kodiaq | PS | 2024-2026 | 1.5 TSI mHEV, 1.5 TSI iV, 2.0 TSI, 2.0 TDI
+Octavia | 1U | 1996-2010 | 1.4, 1.6, 1.8T, 2.0, 1.9 TDI
+Octavia | 1Z | 2004-2013 | 1.2 TSI, 1.4, 1.4 TSI, 1.6, 1.8 TSI, 2.0 FSI, 2.0 TFSI RS, 1.6 TDI, 1.9 TDI, 2.0 TDI
+Octavia | 5E | 2013-2020 | 1.0 TSI, 1.2 TSI, 1.4 TSI, 1.5 TSI, 1.8 TSI, 2.0 TSI RS, 1.4 G-TEC, 1.6 TDI, 2.0 TDI
+Octavia | NX | 2020-2026 | 1.0 TSI, 1.0 eTSI, 1.5 TSI, 1.5 eTSI, 2.0 TSI, 1.4 iV, 2.0 TDI, RS
+Rapid | NH | 2012-2019 | 1.0 TSI, 1.2, 1.2 TSI, 1.4 TSI, 1.4 TDI, 1.6 TDI
+Scala | NW1 | 2019-2026 | 1.0 TSI, 1.5 TSI, 1.0 G-TEC, 1.6 TDI
+Superb | 3U | 2001-2008 | 1.8T, 2.0, 2.8 V6, 1.9 TDI, 2.0 TDI, 2.5 TDI
+Superb | 3T | 2008-2015 | 1.4 TSI, 1.8 TSI, 2.0 TSI, 3.6 V6, 1.6 TDI, 1.9 TDI, 2.0 TDI
+Superb | 3V | 2015-2024 | 1.4 TSI, 1.5 TSI, 1.8 TSI, 2.0 TSI, 1.4 iV, 1.6 TDI, 2.0 TDI
+Superb | 3Y | 2024-2026 | 1.5 TSI mHEV, 2.0 TSI, 1.5 TSI iV, 2.0 TDI
+Yeti | 5L | 2009-2017 | 1.2 TSI, 1.4 TSI, 1.8 TSI, 1.6 TDI, 2.0 TDI
+Enyaq | 5A | 2020-2026 | 60, 80, 85, 85x, RS
+
+# Smart
+ForTwo | W451 | 2007-2014 | 1.0, 1.0 Turbo, 0.8 cdi, electric drive
+ForTwo | C453 | 2014-2024 | 1.0, 0.9 Turbo, EQ
+ForFour | W453 | 2014-2021 | 1.0, 0.9 Turbo, EQ
+#1 | HX11 | 2022-2026 | Pro, Pro+, Premium, Brabus
+
+# SsangYong / KGM
+Korando | C200 | 2010-2019 | 2.0, 2.0 e-XDi, 2.2 e-XDi
+Korando | C300 | 2019-2026 | 1.5 T-GDi, 1.6 e-XDi, e-Motion
+Rexton | Y400 | 2017-2026 | 2.0 T-GDi, 2.2 e-XDi
+Tivoli | X100 | 2015-2026 | 1.2 T-GDi, 1.5 T-GDi, 1.6, 1.6 e-XDi
+
+# Subaru
+Forester | SH | 2008-2013 | 2.0, 2.5 XT, 2.0D
+Forester | SJ | 2013-2018 | 2.0, 2.0 XT, 2.0D
+Forester | SK | 2018-2024 | 2.0 e-Boxer
+Forester | SL | 2024-2026 | 2.0 e-Boxer
+Impreza | GH/GR | 2007-2011 | 1.5, 2.0, 2.5 WRX STI, 2.0D
+Impreza | GT | 2017-2023 | 1.6, 2.0
+Outback | BR | 2009-2014 | 2.5, 3.6, 2.0D
+Outback | BS | 2014-2020 | 2.5, 2.0D
+Outback | BT | 2021-2026 | 2.5
+XV / Crosstrek | GP | 2012-2017 | 1.6, 2.0, 2.0D
+XV / Crosstrek | GT | 2017-2026 | 1.6, 2.0 e-Boxer
+
+# Suzuki
+Ignis | MF | 2016-2026 | 1.2 DualJet, 1.2 Mild Hybrid
+Jimny | JB43 | 1998-2018 | 1.3, 1.5 DDiS
+Jimny | JB74 | 2018-2026 | 1.5
+S-Cross | JY | 2013-2021 | 1.0 BoosterJet, 1.4 BoosterJet, 1.6, 1.6 DDiS
+S-Cross | 2nd gen | 2021-2026 | 1.4 BoosterJet Hybrid, 1.5 Strong Hybrid
+Swift | FZ/NZ | 2010-2017 | 1.2, 1.6 Sport, 1.3 DDiS
+Swift | AZ | 2017-2024 | 1.0 BoosterJet, 1.2 DualJet, 1.2 Hybrid, 1.4 BoosterJet Sport
+Swift | AZH | 2024-2026 | 1.2 Hybrid
+Vitara | LY | 2015-2026 | 1.0 BoosterJet, 1.4 BoosterJet, 1.6, 1.5 Strong Hybrid, 1.6 DDiS
+
+# Tesla
+Model 3 | Pre-Highland | 2017-2023 | Standard Range, Long Range, Performance
+Model 3 | Highland | 2023-2026 | RWD, Long Range, Performance
+Model S | 1st gen | 2012-2026 | 75D, 90D, 100D, Long Range, Plaid
+Model X | 1st gen | 2015-2026 | 75D, 90D, 100D, Long Range, Plaid
+Model Y | 1st gen | 2020-2025 | RWD, Long Range, Performance
+Model Y | Juniper | 2025-2026 | RWD, Long Range, Performance
+
+# Toyota
+Auris | E150 | 2007-2012 | 1.33, 1.4, 1.6, 1.8 Hybrid, 1.4 D-4D, 2.0 D-4D, 2.2 D-4D
+Auris | E180 | 2012-2018 | 1.2T, 1.33, 1.6, 1.8 Hybrid, 1.4 D-4D, 1.6 D-4D, 2.0 D-4D
+Aygo / Aygo X | AB10 | 2005-2014 | 1.0, 1.4 D-4D
+Aygo / Aygo X | AB40 | 2014-2022 | 1.0
+Aygo / Aygo X | AB70 (Aygo X) | 2022-2026 | 1.0, 1.5 Hybrid
+C-HR | AX10 | 2016-2023 | 1.2T, 1.8 Hybrid, 2.0 Hybrid
+C-HR | AX20 | 2023-2026 | 1.8 Hybrid, 2.0 Hybrid, 2.0 PHEV
+Corolla | E120 | 2000-2007 | 1.4, 1.6, 1.8, 1.4 D-4D, 2.0 D-4D
+Corolla | E150 | 2007-2013 | 1.33, 1.4, 1.6, 1.4 D-4D, 2.0 D-4D, 2.2 D-4D
+Corolla | E210 | 2019-2026 | 1.2T, 1.8 Hybrid, 2.0 Hybrid
+Hilux | AN10/AN20/AN30 | 2005-2015 | 2.5 D-4D, 3.0 D-4D
+Hilux | AN120/AN130 | 2015-2026 | 2.4 D-4D, 2.8 D-4D
+Land Cruiser | J150 | 2009-2024 | 2.8 D-4D, 3.0 D-4D, 4.0 V6
+Land Cruiser | J250 | 2024-2026 | 2.8 D-4D
+Prius | XW30 | 2009-2015 | 1.8 Hybrid
+Prius | XW50 | 2015-2022 | 1.8 Hybrid, Plug-in
+Prius | XW60 | 2023-2026 | 2.0 PHEV
+RAV4 | XA30 | 2005-2012 | 2.0, 2.2 D-4D
+RAV4 | XA40 | 2012-2018 | 2.0, 2.5 Hybrid, 2.0 D-4D, 2.2 D-4D
+RAV4 | XA50 | 2018-2026 | 2.0, 2.5 Hybrid, 2.5 PHEV
+Yaris | XP90 | 2005-2011 | 1.0, 1.3, 1.33, 1.4 D-4D
+Yaris | XP130 | 2011-2020 | 1.0, 1.33, 1.5, 1.5 Hybrid, 1.4 D-4D, GRMN
+Yaris | XP210 | 2020-2026 | 1.0, 1.5, 1.5 Hybrid, GR Yaris
+Yaris Cross | XP210 | 2021-2026 | 1.5, 1.5 Hybrid
+Proace | MDX/K0 | 2016-2026 | 1.5 D-4D, 1.6 D-4D, 2.0 D-4D, Proace Electric
+
+# Volkswagen
+Arteon | 3H | 2017-2024 | 1.5 TSI, 2.0 TSI, 1.4 eHybrid, 2.0 TDI, R
+Caddy | 2K | 2004-2020 | 1.2 TSI, 1.4 TSI, 1.6, 1.0 TSI, 1.6 TDI, 1.9 TDI, 2.0 TDI, 2.0 TGI
+Caddy | SB | 2020-2026 | 1.5 TSI, 1.5 eHybrid, 2.0 TDI, 1.5 TGI
+Golf | Mk4 | 1997-2003 | 1.4, 1.6, 1.8, 1.8T GTI, 2.0, 2.3 V5, 2.8 V6, 3.2 R32, 1.9 SDI, 1.9 TDI
+Golf | Mk5 | 2003-2008 | 1.4, 1.4 TSI, 1.6, 1.6 FSI, 2.0 FSI, 2.0 TFSI GTI, 3.2 R32, 1.9 TDI, 2.0 TDI
+Golf | Mk6 | 2008-2012 | 1.2 TSI, 1.4, 1.4 TSI, 1.6, 2.0 TSI GTI, 2.0 TSI R, 1.6 TDI, 2.0 TDI, 2.0 TDI GTD
+Golf | Mk7 | 2012-2019 | 1.0 TSI, 1.2 TSI, 1.4 TSI, 1.5 TSI, 1.8 TSI, 2.0 TSI GTI, 2.0 TSI R, GTE, e-Golf, 1.6 TDI, 2.0 TDI, 2.0 TDI GTD
+Golf | Mk8 | 2019-2026 | 1.0 TSI, 1.0 eTSI, 1.5 TSI, 1.5 eTSI, 2.0 TSI GTI, 2.0 TSI R, 1.4/1.5 eHybrid, GTE, 2.0 TDI, 2.0 TDI GTD
+Golf Plus / Sportsvan | 5M/AM | 2005-2020 | 1.2 TSI, 1.4 TSI, 1.6, 1.0 TSI, 1.5 TSI, 1.6 TDI, 1.9 TDI, 2.0 TDI
+ID.3 | E11 | 2020-2026 | Pure, Pro, Pro S, GTX
+ID.4 | E21 | 2020-2026 | Pure, Pro, GTX
+Jetta | Mk5/Mk6 | 2005-2018 | 1.2 TSI, 1.4 TSI, 1.6, 2.0 TSI, 1.6 TDI, 1.9 TDI, 2.0 TDI
+Passat | B5 | 1996-2005 | 1.6, 1.8, 1.8T, 2.0, 2.3 V5, 2.8 V6, 1.9 TDI, 2.5 TDI
+Passat | B6 | 2005-2010 | 1.4 TSI, 1.6, 1.8 TSI, 2.0 FSI, 2.0 TFSI, 3.2 V6, 1.6 TDI, 1.9 TDI, 2.0 TDI
+Passat | B7 | 2010-2014 | 1.4 TSI, 1.8 TSI, 2.0 TSI, 3.6 V6, 1.6 TDI, 2.0 TDI
+Passat | B8 | 2014-2023 | 1.4 TSI, 1.5 TSI, 1.8 TSI, 2.0 TSI, GTE, 1.6 TDI, 2.0 TDI
+Passat | B9 | 2023-2026 | 1.5 eTSI, 2.0 TSI, 1.5 eHybrid, 2.0 TDI
+Polo | 9N | 2001-2009 | 1.2, 1.4, 1.6, 1.8T GTI, 1.4 TDI, 1.9 TDI, 1.9 SDI
+Polo | 6R/6C | 2009-2017 | 1.0, 1.2, 1.2 TSI, 1.4, 1.4 TSI GTI, 1.8 TSI GTI, 1.0 TSI, 1.2 TDI, 1.4 TDI, 1.6 TDI
+Polo | AW | 2017-2026 | 1.0 MPI, 1.0 TSI 95, 1.0 TSI 110, 1.5 TSI, 2.0 TSI GTI, 1.0 TGI, 1.6 TDI
+Scirocco | 13 | 2008-2017 | 1.4 TSI, 2.0 TSI, 2.0 TSI R, 2.0 TDI
+Sharan | 7M | 1995-2010 | 1.8T, 2.0, 2.8 V6, 1.9 TDI, 2.0 TDI
+Sharan | 7N | 2010-2022 | 1.4 TSI, 2.0 TSI, 2.0 TDI
+T-Cross | C1 | 2019-2026 | 1.0 TSI 95, 1.0 TSI 110, 1.5 TSI, 1.6 TDI
+T-Roc | A1 | 2017-2026 | 1.0 TSI, 1.5 TSI, 2.0 TSI, 2.0 TSI R, 1.6 TDI, 2.0 TDI
+Tiguan | 5N | 2007-2016 | 1.4 TSI, 2.0 TSI, 2.0 TDI
+Tiguan | AD/BW | 2016-2024 | 1.4 TSI, 1.5 TSI, 2.0 TSI, 1.4 eHybrid, 2.0 TDI, R
+Tiguan | CT | 2024-2026 | 1.5 eTSI, 2.0 TSI, 1.5 eHybrid, 2.0 TDI
+Touareg | 7L | 2002-2010 | 3.2 V6, 3.6 V6, 4.2 V8, 2.5 TDI, 3.0 TDI, 5.0 V10 TDI
+Touareg | 7P | 2010-2018 | 3.6 V6, 3.0 TDI, 4.2 TDI, Hybrid
+Touareg | CR | 2018-2026 | 3.0 TSI, 3.0 eHybrid, 3.0 TDI, R
+Touran | 1T | 2003-2015 | 1.4 TSI, 1.6, 2.0 FSI, 1.6 TDI, 1.9 TDI, 2.0 TDI
+Touran | 5T | 2015-2026 | 1.0 TSI, 1.2 TSI, 1.4 TSI, 1.5 TSI, 1.6 TDI, 2.0 TDI
+Transporter / Multivan | T5 | 2003-2015 | 2.0, 1.9 TDI, 2.0 TDI, 2.5 TDI
+Transporter / Multivan | T6 / T6.1 | 2015-2024 | 2.0 TSI, 2.0 TDI, eTransporter
+Multivan | T7 | 2021-2026 | 1.5 TSI, 2.0 TSI, 1.4 eHybrid, 2.0 TDI
+Up! | 121 | 2011-2023 | 1.0, 1.0 TSI GTI, e-up!
+
+# Volvo
+C30 | 533 | 2006-2013 | 1.6, 2.0, 2.4i, T5, D2, 1.6D, D3, D4, 2.0D
+EX30 | 1st gen | 2023-2026 | Single Motor, Single Motor ER, Twin Motor
+S60 | 1st gen | 2000-2010 | 2.4, T5, R, D5, 2.4D
+S60 / V60 | 2nd gen | 2010-2018 | T3, T4, T5, T6, D2, D3, D4, D5, D6 Plug-in
+S60 / V60 | 3rd gen | 2018-2026 | B3, B4, B5, T6 Recharge, T8 Recharge, D3, D4
+S80 | 2nd gen | 2006-2016 | 2.0, 2.5T, 3.2, T6, D3, D4, D5
+S90 / V90 | 2nd gen | 2016-2026 | B4, B5, T5, T6, T8, D4, D5
+V40 | 2nd gen | 2012-2019 | T2, T3, T4, T5, D2, D3, D4
+V70 | 3rd gen | 2007-2016 | 2.0, 2.5T, T4, T6, D2, D3, D4, D5
+XC40 | 1st gen | 2017-2026 | T2, T3, T4, T5 Recharge, B3, B4, D3, D4, Recharge Electric
+XC60 | 1st gen | 2008-2017 | T5, T6, D3, D4, D5
+XC60 | 2nd gen | 2017-2026 | B4, B5, B6, T6 Recharge, T8 Recharge, D4, D5
+XC90 | 1st gen | 2002-2014 | 2.5T, 3.2, T6, V8, D5
+XC90 | 2nd gen | 2015-2026 | B5, B6, T5, T6, T8 Recharge, D4, D5

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600">
+<rect width="600" height="600" fill="#f4f4f2"/>
+<defs><pattern id="hx" width="26" height="45" patternUnits="userSpaceOnUse"><path d="M13 0l13 7.5v15L13 30 0 22.5v-15zM13 30v15" fill="none" stroke="#3a3a3d" stroke-width="2.4"/></pattern></defs>
+<g transform="translate(300 280) rotate(-6)">
+<path d="M-118-180h214l30 62-10 286h-246l-20-272z" fill="#232325"/>
+<path d="M-118-180h214l30 62-10 286h-246l-20-272z" fill="url(#hx)"/>
+<path d="M-108-170h196l26 56-9 272h-226l-18-258z" fill="none" stroke="#c9c9c4" stroke-width="3" stroke-dasharray="9 6"/>
+</g>
+<text x="300" y="548" fill="#6b6b70" font-family="Inter,Arial,sans-serif" font-size="20" font-weight="600" letter-spacing="5" text-anchor="middle">EVO · CUSTOM FIT</text>
+</svg>

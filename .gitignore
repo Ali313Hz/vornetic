@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Store data — customers, orders, uploaded photos, backups (never upload these)
+data/store.db*
+data/uploads/
+data/backups/
+uploads/
+
+# Secrets
+.env
+
+# Local only
+_old_version/
+.claude/
