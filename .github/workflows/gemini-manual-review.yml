@@ -14,6 +14,8 @@ permissions:
 
 jobs:
   review:
+    if: github.ref == 'refs/heads/main'
+    environment: gemini-review
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
