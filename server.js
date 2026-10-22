@@ -14,12 +14,16 @@ const catalog = require('./catalog');
 
 const app = express();
 const PORT = process.env.PORT || 3300;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'vornetic2026';
+const DEFAULT_ADMIN_PASSWORD = 'vornetic2026';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || '';
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-if (ADMIN_PASSWORD === 'vornetic2026') console.warn('⚠  Using the default admin password. Set ADMIN_PASSWORD before going live.');
+// The default password is public (README, source). In production it never unlocks the panel.
+const ADMIN_LOCKED = IS_PROD && ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD;
+if (ADMIN_LOCKED) console.error('✖  Admin login disabled: set a strong ADMIN_PASSWORD in .env (the default one is not allowed in production).');
+else if (ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD) console.warn('⚠  Using the default admin password. Set ADMIN_PASSWORD before going live.');
 
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -66,7 +70,8 @@ const upload = multer({
 const hits = new Map();
 function limit(max, windowMs) {
   return (req, res, next) => {
-    const key = req.path + '|' + req.ip;
+    // Express routing ignores case and a trailing slash, so the key must too
+    const key = (req.path.toLowerCase().replace(/\/+$/, '') || '/') + '|' + req.ip;
     const now = Date.now();
     const arr = (hits.get(key) || []).filter(t => now - t < windowMs);
     if (arr.length >= max) return res.status(429).json({ error: 'Too many requests, try again later' });
@@ -441,9 +446,10 @@ function requireAdmin(req, res, next) {
 }
 
 app.post('/api/admin/login', limit(8, 15 * 60 * 1000), (req, res) => {
-  const given = Buffer.from(String((req.body || {}).password || ''));
-  const real = Buffer.from(ADMIN_PASSWORD);
-  if (given.length !== real.length || !crypto.timingSafeEqual(given, real))
+  if (ADMIN_LOCKED) return res.status(503).json({ error: 'Admin login disabled: set ADMIN_PASSWORD on the server' });
+  // Compare fixed-length digests so the check does not reveal the password length
+  const digest = v => crypto.createHash('sha256').update(String(v)).digest();
+  if (!crypto.timingSafeEqual(digest((req.body || {}).password || ''), digest(ADMIN_PASSWORD)))
     return res.status(401).json({ error: 'Wrong password' });
   const token = crypto.randomBytes(32).toString('hex');
   db.prepare('INSERT INTO admin_sessions (token) VALUES (?)').run(token);
