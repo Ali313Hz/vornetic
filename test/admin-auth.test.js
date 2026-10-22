@@ -22,37 +22,56 @@ const freePort = () => new Promise((resolve, reject) => {
 const tempDataDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'vornetic-test-'));
 
 // Pass `dataDir` to reuse a database across restarts; the caller then removes it.
-async function startServer(env = {}, dataDir) {
+// `readyText` / `timeoutMs` exist so the failure path itself can be tested.
+async function startServer(env = {}, dataDir, { readyText = 'Vornetic →', timeoutMs = 15000 } = {}) {
   const ownDir = !dataDir;
   if (ownDir) dataDir = tempDataDir();
-  const port = await freePort();
-  const childEnv = { ...process.env, PORT: String(port), DATA_DIR: dataDir, NODE_ENV: 'test', ...env };
-  for (const k of Object.keys(childEnv)) if (childEnv[k] === undefined) delete childEnv[k];
-  for (const k of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'STRIPE_SECRET_KEY']) delete childEnv[k];
-  const child = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
-  let log = '';
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('server did not start:\n' + log)), 15000);
-    const onData = d => {
-      log += d;
-      if (log.includes('Vornetic →')) { clearTimeout(timer); resolve(); }
-    };
-    child.stdout.on('data', onData);
-    child.stderr.on('data', onData);
-    child.on('exit', code => { clearTimeout(timer); reject(new Error(`server exited (${code}):\n${log}`)); });
-  });
-  const base = `http://127.0.0.1:${port}`;
-  return {
-    base,
-    get log() { return log; },
-    async stop() {
+  let child, closed, log = '';
+  // Kill the child (if still running), wait for it and its pipes to close, remove our temp dir
+  const cleanup = async () => {
+    if (child) {
       child.removeAllListeners('exit');
-      child.kill();
-      await new Promise(r => child.once('close', r));
-      if (ownDir) fs.rmSync(dataDir, { recursive: true, force: true });
-    },
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      await closed;
+    }
+    if (ownDir) fs.rmSync(dataDir, { recursive: true, force: true });
   };
+  try {
+    const port = await freePort();
+    const childEnv = { ...process.env, PORT: String(port), DATA_DIR: dataDir, NODE_ENV: 'test', ...env };
+    for (const k of Object.keys(childEnv)) if (childEnv[k] === undefined) delete childEnv[k];
+    for (const k of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'STRIPE_SECRET_KEY']) delete childEnv[k];
+    child = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    // Listen for 'close' from the start: it may fire before cleanup runs (e.g. the server crashed)
+    closed = new Promise(r => child.once('close', r));
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('server did not start:\n' + log)), timeoutMs);
+      const onData = d => {
+        log += d;
+        if (log.includes(readyText)) { clearTimeout(timer); resolve(); }
+      };
+      child.stdout.on('data', onData);
+      child.stderr.on('data', onData);
+      child.on('error', err => { clearTimeout(timer); reject(err); });
+      child.on('exit', code => { clearTimeout(timer); reject(new Error(`server exited (${code}):\n${log}`)); });
+    });
+    return {
+      base: `http://127.0.0.1:${port}`,
+      pid: child.pid,
+      get log() { return log; },
+      stop: cleanup,
+    };
+  } catch (err) {
+    await cleanup();
+    err.pid = child && child.pid;
+    err.dataDir = dataDir;
+    throw err;
+  }
 }
+
+const isRunning = pid => {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+};
 
 const login = (base, password, urlPath = '/api/admin/login') => fetch(base + urlPath, {
   method: 'POST',
@@ -139,8 +158,8 @@ test('in development the default password still works (local setup unchanged)', 
 const { DatabaseSync } = require('node:sqlite');
 const me = (base, cookie) => fetch(base + '/api/admin/me', { headers: { Cookie: cookie } });
 
-// A database as the previous release left it: admin_sessions without the password tag,
-// holding a live token (e.g. one obtained with the public default password).
+// A database as the previous release left it, holding a live admin token
+// (e.g. one obtained with the public default password).
 function seedPreUpgradeSession(dataDir) {
   const token = 'b'.repeat(64);
   const db = new DatabaseSync(path.join(dataDir, 'store.db'));
@@ -205,17 +224,71 @@ test('session made with the default password stops working once a strong passwor
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('changing ADMIN_PASSWORD ends old sessions; restarting with the same one keeps them', async () => {
+test('restarting the server logs admins out, even with the same password', async () => {
   const dir = tempDataDir();
   try {
     let cookie;
     const first = await startServer({ ADMIN_PASSWORD: TEST_PASSWORD }, dir);
-    try { cookie = cookieOf(await login(first.base, TEST_PASSWORD)); } finally { await first.stop(); }
+    try {
+      cookie = cookieOf(await login(first.base, TEST_PASSWORD));
+      assert.strictEqual((await me(first.base, cookie)).status, 200);
+    } finally { await first.stop(); }
 
     const same = await startServer({ ADMIN_PASSWORD: TEST_PASSWORD }, dir);
-    try { assert.strictEqual((await me(same.base, cookie)).status, 200); } finally { await same.stop(); }
-
-    const changed = await startServer({ ADMIN_PASSWORD: TEST_PASSWORD + '-rotated' }, dir);
-    try { assert.strictEqual((await me(changed.base, cookie)).status, 401); } finally { await changed.stop(); }
+    try {
+      assert.strictEqual((await me(same.base, cookie)).status, 401);
+      // logging in again works as usual
+      assert.strictEqual((await me(same.base, cookieOf(await login(same.base, TEST_PASSWORD)))).status, 200);
+    } finally { await same.stop(); }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Codex review P2: no offline-guessable password verifier may be written to the database
+test('nothing derived from ADMIN_PASSWORD is stored with admin sessions', async () => {
+  const dir = tempDataDir();
+  try {
+    // simulate a database left behind by the earlier pw_tag pre-release
+    const pre = new DatabaseSync(path.join(dir, 'store.db'));
+    pre.exec("CREATE TABLE admin_sessions (token TEXT PRIMARY KEY, created_at TEXT DEFAULT (datetime('now')), pw_tag TEXT)");
+    pre.prepare('INSERT INTO admin_sessions (token, pw_tag) VALUES (?, ?)').run('c'.repeat(64), 'd'.repeat(64));
+    pre.close();
+
+    const srv = await startServer({ ADMIN_PASSWORD: TEST_PASSWORD }, dir);
+    try {
+      assert.strictEqual((await login(srv.base, TEST_PASSWORD)).status, 200);
+      const db = new DatabaseSync(path.join(dir, 'store.db'));
+      try {
+        const cols = db.prepare('PRAGMA table_info(admin_sessions)').all().map(c => c.name);
+        assert.deepStrictEqual(cols.sort(), ['created_at', 'token']);
+        const rows = db.prepare('SELECT * FROM admin_sessions').all();
+        assert.strictEqual(rows.length, 1);
+        assert.ok(!JSON.stringify(rows).includes('d'.repeat(64)));
+        assert.ok(!JSON.stringify(rows).includes(TEST_PASSWORD));
+      } finally { db.close(); }
+    } finally { await srv.stop(); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Codex review P2: a failed start must not leave the server process or temp data behind
+test('test helper kills the child and removes its temp dir when startup times out', async () => {
+  const err = await startServer({ ADMIN_PASSWORD: TEST_PASSWORD }, undefined,
+    { readyText: 'this banner never appears', timeoutMs: 3000 }).then(
+    () => assert.fail('startServer should have rejected'), e => e);
+  assert.match(err.message, /did not start/);
+  assert.ok(err.pid > 0);
+  assert.strictEqual(isRunning(err.pid), false, 'child process still running');
+  assert.strictEqual(fs.existsSync(err.dataDir), false, 'temp DATA_DIR not removed');
+});
+
+test('test helper cleans up when the server exits during startup', async () => {
+  // DATA_DIR pointing at a file makes db.js fail at mkdir, so the server exits right away
+  const blocker = path.join(os.tmpdir(), `vornetic-test-file-${process.pid}-${Date.now()}`);
+  fs.writeFileSync(blocker, '');
+  try {
+    const err = await startServer({ ADMIN_PASSWORD: TEST_PASSWORD, DATA_DIR: blocker }, undefined, { timeoutMs: 15000 })
+      .then(() => assert.fail('startServer should have rejected'), e => e);
+    assert.match(err.message, /server exited/);
+    assert.strictEqual(isRunning(err.pid), false);
+    assert.strictEqual(fs.existsSync(err.dataDir), false, 'helper temp dir not removed');
+  } finally { fs.rmSync(blocker, { force: true }); }
 });

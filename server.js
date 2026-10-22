@@ -438,17 +438,15 @@ function stripeCheckout({ ref, email, lang, items, shipping, base }) {
 // ============================================================
 const adminCookie = { httpOnly: true, sameSite: 'strict', secure: IS_PROD, maxAge: 14 * 24 * 3600 * 1000 };
 
-// Each admin session records which password it was issued under. Sessions from before this
-// existed (NULL tag) or from an earlier ADMIN_PASSWORD — e.g. the public default — stop working.
-const ADMIN_PW_TAG = crypto.scryptSync(ADMIN_PASSWORD, 'vornetic-admin-session-v1', 32).toString('hex');
-db.prepare(ADMIN_LOCKED ? 'DELETE FROM admin_sessions'
-  : "DELETE FROM admin_sessions WHERE pw_tag IS NOT ? OR created_at <= datetime('now','-14 day')")
-  .run(...(ADMIN_LOCKED ? [] : [ADMIN_PW_TAG]));
+// Every start logs all admins out. A session issued before a deploy or under an earlier
+// ADMIN_PASSWORD (e.g. the public default) can never outlive the process that issued it,
+// and nothing derived from the password is stored.
+db.exec('DELETE FROM admin_sessions');
 
 function requireAdmin(req, res, next) {
   const t = req.cookies.admin;
   const s = !ADMIN_LOCKED && t && db.prepare(
-    "SELECT * FROM admin_sessions WHERE token = ? AND pw_tag = ? AND created_at > datetime('now','-14 day')").get(t, ADMIN_PW_TAG);
+    "SELECT * FROM admin_sessions WHERE token = ? AND created_at > datetime('now','-14 day')").get(t);
   if (!s) return res.status(401).json({ error: 'Not authorised' });
   next();
 }
@@ -460,7 +458,7 @@ app.post('/api/admin/login', limit(8, 15 * 60 * 1000), (req, res) => {
   if (!crypto.timingSafeEqual(digest((req.body || {}).password || ''), digest(ADMIN_PASSWORD)))
     return res.status(401).json({ error: 'Wrong password' });
   const token = crypto.randomBytes(32).toString('hex');
-  db.prepare('INSERT INTO admin_sessions (token, pw_tag) VALUES (?, ?)').run(token, ADMIN_PW_TAG);
+  db.prepare('INSERT INTO admin_sessions (token) VALUES (?)').run(token);
   res.cookie('admin', token, adminCookie);
   res.json({ ok: true });
 });
