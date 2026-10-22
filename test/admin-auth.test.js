@@ -292,3 +292,23 @@ test('test helper cleans up when the server exits during startup', async () => {
     assert.strictEqual(fs.existsSync(err.dataDir), false, 'helper temp dir not removed');
   } finally { fs.rmSync(blocker, { force: true }); }
 });
+
+// Codex review P2 (59029eb): a second server that fails to bind its port must not log admins out
+test('a second start that fails with EADDRINUSE leaves existing admin sessions valid', async () => {
+  const dir = tempDataDir();
+  try {
+    const running = await startServer({ ADMIN_PASSWORD: TEST_PASSWORD }, dir);
+    try {
+      const cookie = cookieOf(await login(running.base, TEST_PASSWORD));
+      assert.strictEqual((await me(running.base, cookie)).status, 200);
+
+      const port = new URL(running.base).port;
+      const err = await startServer({ ADMIN_PASSWORD: TEST_PASSWORD, PORT: port }, dir)
+        .then(() => assert.fail('second server should not have started'), e => e);
+      assert.match(err.message, /server exited \(1\)/);
+      assert.match(err.message, /already used/);
+
+      assert.strictEqual((await me(running.base, cookie)).status, 200, 'admin was logged out by the failed start');
+    } finally { await running.stop(); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

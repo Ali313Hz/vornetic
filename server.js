@@ -438,10 +438,10 @@ function stripeCheckout({ ref, email, lang, items, shipping, base }) {
 // ============================================================
 const adminCookie = { httpOnly: true, sameSite: 'strict', secure: IS_PROD, maxAge: 14 * 24 * 3600 * 1000 };
 
-// Every start logs all admins out. A session issued before a deploy or under an earlier
-// ADMIN_PASSWORD (e.g. the public default) can never outlive the process that issued it,
-// and nothing derived from the password is stored.
-db.exec('DELETE FROM admin_sessions');
+// Every successful start logs all admins out (see app.listen below). A session issued before
+// a deploy or under an earlier ADMIN_PASSWORD (e.g. the public default) can never outlive the
+// process that issued it, and nothing derived from the password is stored.
+const revokeAdminSessions = () => db.exec('DELETE FROM admin_sessions');
 
 function requireAdmin(req, res, next) {
   const t = req.cookies.admin;
@@ -807,7 +807,12 @@ app.get(/^\/(?!api|uploads).*/, (req, res) => {
 backup();
 setInterval(backup, 6 * 3600 * 1000).unref();
 
-const server = app.listen(PORT, () => console.log(`Vornetic → http://localhost:${PORT}   Admin → http://localhost:${PORT}/admin`));
+const server = app.listen(PORT, () => {
+  // Only once the port is ours: a start that fails (e.g. EADDRINUSE because another instance
+  // is running on the same data) must not log out that instance's admins.
+  revokeAdminSessions();
+  console.log(`Vornetic → http://localhost:${PORT}   Admin → http://localhost:${PORT}/admin`);
+});
 server.on('error', err => {
   if (err.code === 'EADDRINUSE') {
     console.error(`\n✖ Port ${PORT} is already used by another program (maybe another project).`);
