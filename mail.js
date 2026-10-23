@@ -63,6 +63,8 @@ const L = {
     tracking: 'Tracking number',
     cancelled_subject: ref => `Order ${ref} cancelled`,
     cancelled_intro: 'Your order has been cancelled. If you already paid, we will refund you in full. Reply to this e-mail if you have any question.',
+    charged_cancelled_subject: ref => `Payment received for cancelled order ${ref} — refund on its way`,
+    charged_cancelled_intro: a => `We received your card payment of <b>${a}</b>, but this order had already been cancelled, so it will <b>not</b> be shipped. We will refund the full amount to your card. Reply to this e-mail if you have any question.`,
     wd_subject: ref => `Withdrawal received — order ${ref}`,
     wd_intro: (ref, when) => `We have received your withdrawal from order <b>${ref}</b> on ${when}.`,
     wd_next: 'We will send you the return instructions shortly. We will refund the amount within 14 days of receiving the products back.',
@@ -89,6 +91,8 @@ const L = {
     tracking: 'Número de seguimiento',
     cancelled_subject: ref => `Pedido ${ref} cancelado`,
     cancelled_intro: 'Tu pedido ha sido cancelado. Si ya habías pagado, te devolveremos el importe completo. Responde a este email si tienes cualquier duda.',
+    charged_cancelled_subject: ref => `Pago recibido para el pedido cancelado ${ref} — te lo devolvemos`,
+    charged_cancelled_intro: a => `Hemos recibido tu pago con tarjeta de <b>${a}</b>, pero este pedido ya estaba cancelado, así que <b>no</b> se enviará. Te devolveremos el importe completo a tu tarjeta. Responde a este email si tienes cualquier duda.`,
     wd_subject: ref => `Desistimiento recibido — pedido ${ref}`,
     wd_intro: (ref, when) => `Hemos recibido tu desistimiento del pedido <b>${ref}</b> el ${when}.`,
     wd_next: 'Te enviaremos en breve las instrucciones de devolución. Te devolveremos el importe en un máximo de 14 días desde que recibamos los productos.',
@@ -187,8 +191,22 @@ function shopWithdrawal(w, o, s, base) {
     <p><b>${esc(o.ref)}</b> · ${esc(w.name)} · ${esc(w.email)}</p>
     ${w.message ? `<p>${esc(w.message)}</p>` : ''}${itemsTable(o, 'es')}<p><a href="${base}/admin">Panel</a></p>`, s));
 }
+// A card payment arrived for an order that was already cancelled: tell the customer it won't
+// ship and will be refunded, and tell the shop a refund is owed.
+function chargedAfterCancel(o, s) {
+  const t = T(o.lang);
+  return send(o.email, t.charged_cancelled_subject(o.ref), layout(`<p>${t.hello(esc(o.customer_name))}</p>
+    <p>${t.charged_cancelled_intro(eur(o.total_cents))}</p><p><b>${t.order}: ${esc(o.ref)}</b></p><p>${t.bye}</p>`, s));
+}
+function shopChargedAfterCancel(o, s, base) {
+  return send(s.shop_email, `⚠ İptal edilmiş sipariş ödendi — ${o.ref} — ${eur(o.total_cents)} iade et`, layout(`
+    <p><b>${esc(o.ref)}</b> iptal edilmişti ama kartla ${eur(o.total_cents)} ödendi.
+    Parayı müşteriye geri öde ve panelde "İade ekle" ile kaydet.</p>
+    <p>${esc(o.customer_name)} · ${esc(o.email)}</p><p><a href="${base}/admin">Panel</a></p>`, s));
+}
 function test(s) {
   return send(s.shop_email, 'Vornetic — test e-mail', layout('<p>E-posta ayarları çalışıyor ✔</p>', s));
 }
 
-module.exports = { enabled, orderConfirmation, statusUpdate, withdrawalAck, passwordReset, shopNewOrder, shopWithdrawal, test };
+module.exports = { enabled, orderConfirmation, statusUpdate, withdrawalAck, passwordReset, shopNewOrder, shopWithdrawal,
+  chargedAfterCancel, shopChargedAfterCancel, test };
