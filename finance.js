@@ -5,6 +5,7 @@
 // - Everything else (Amazon, Wallapop, Vinted, wholesale, storage, gestor, taxes…) is entered by
 //   hand or imported from a CSV file, into the finance_entries table.
 // - Amounts are EUR cents. This is a management estimate, not accounting or a tax return.
+const { writeXlsx } = require('./xlsx');
 
 // ---------- Categories ----------
 // For income the category is where the money came from; "website" is deliberately not one.
@@ -198,6 +199,13 @@ function entryKey(e) {
 // warning in the preview so the admin can check, instead of being silently skipped or doubled.
 function readImport(text, savedCount, similarSaved = () => false) {
   const out = { add: [], duplicates: [], errors: [], ignored: [], warnings: [] };
+  // Excel's plain "CSV" is saved in the old Windows encoding, not UTF-8: accented letters arrive
+  // as "�". Such text would not match the saved entries, so already-saved rows would be added
+  // again. Refuse the whole file and say how to save it.
+  if (String(text).includes('�')) {
+    out.errors.push({ line: 1, msg: ENCODING_MSG });
+    return out;
+  }
   const rows = parseCsv(text).filter(r => r.cells.some(c => c.trim() !== ''));
   if (!rows.length) { out.errors.push({ line: 1, msg: 'Dosya boş' }); return out; }
   const header = rows.shift();
@@ -269,8 +277,13 @@ function readImport(text, savedCount, similarSaved = () => false) {
   for (const lines of repeated.values()) {
     if (lines.length > 1) out.warnings.push(`Satır ${lines.join(', ')} birebir aynı — gerçekten ayrı işlemler mi? Değilse fazlasını sil.`);
   }
+  // Letters Windows' old encoding doesn't have (ş, ı, ğ…) are saved by Excel as a plain "?",
+  // which can't be told apart from a real "?". A "?" inside a word gets a warning.
+  const suspicious = out.add.filter(a => [a.note, a.party, a.reference].some(t => /\p{L}\?|\?\p{L}/u.test(t))).map(a => a.line);
+  if (suspicious.length) out.warnings.push(`Satır ${suspicious.join(', ')}: kelime içinde "?" var — Türkçe harfler kaybolmuş olabilir. ${ENCODING_MSG}`);
   return out;
 }
+const ENCODING_MSG = 'Dosya UTF-8 değil. Excel\'de "Farklı Kaydet → CSV UTF-8 (virgülle ayrılmış)" seçip tekrar yükle.';
 
 // ---------- Months ----------
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -387,32 +400,50 @@ function register(app, { db, requireAdmin }) {
     res.json({ ok: true });
   });
 
-  // CSV for Excel: manual entries plus website payments/refunds (marked web_sale / web_refund,
-  // which the importer skips, so re-importing this file never doubles anything).
-  app.get(fin + '/export.csv', requireAdmin, (req, res) => {
-    const month = MONTH_RE.test(req.query.month || '') ? req.query.month : null;
+  // The rows of an export: manual entries plus website payments/refunds (marked web_sale /
+  // web_refund, which the importer skips, so re-importing an export never doubles anything).
+  // Amounts are in cents here; each format writes them its own way.
+  const EXPORT_HEADER = ['id', 'type', 'date', 'amount_eur', 'category', 'note', 'country', 'party', 'reference'];
+  function exportRows(month) {
     const from = month ? month + '-01' : '0000-01-01', to = month ? nextMonth(month) + '-01' : '9999-12-31';
     const [utcFrom, utcTo] = utcRange(month);
     const label = (kind, cat) => CATEGORIES[kind]?.[cat] || cat;
-    const rows = [['id', 'type', 'date', 'amount_eur', 'category', 'note', 'country', 'party', 'reference']];
-    const list = [
+    return [
       ...db.prepare(`SELECT ${ENTRY_COLS} FROM finance_entries WHERE date >= ? AND date < ?`).all(from, to)
-        .map(e => ({ sort: e.date, row: [e.id, e.kind === 'income' ? 'gelir' : 'gider', e.date, csvAmount(e.amount_cents),
+        .map(e => ({ sort: e.date, row: [e.id, e.kind === 'income' ? 'gelir' : 'gider', e.date, e.amount_cents,
           label(e.kind, e.category), e.note, e.country, e.party, e.reference] })),
       ...db.prepare('SELECT ref, paid_at, total_cents, country FROM orders WHERE paid_at >= ? AND paid_at < ?').all(utcFrom, utcTo)
-        .map(o => { const day = utcTextToLocalDate(o.paid_at); return { sort: day, row: ['', 'web_sale', day, csvAmount(o.total_cents),
+        .map(o => { const day = utcTextToLocalDate(o.paid_at); return { sort: day, row: ['', 'web_sale', day, o.total_cents,
           'web', 'Web sitesi siparişi', o.country, '', o.ref] }; }),
       ...db.prepare(`SELECT r.created_at, r.amount_cents, o.ref, o.country FROM refunds r JOIN orders o ON o.id = r.order_id
           WHERE r.created_at >= ? AND r.created_at < ?`).all(utcFrom, utcTo)
-        .map(r => { const day = utcTextToLocalDate(r.created_at); return { sort: day, row: ['', 'web_refund', day, csvAmount(r.amount_cents),
+        .map(r => { const day = utcTextToLocalDate(r.created_at); return { sort: day, row: ['', 'web_refund', day, r.amount_cents,
           'web', 'Web sitesi iadesi', r.country, '', r.ref] }; }),
-    ].sort((a, b) => a.sort.localeCompare(b.sort));
-    res.set({
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="vornetic-finans-${month || 'tumu'}.csv"`,
-      'Cache-Control': 'no-store',
-    });
-    res.send(toCsv(rows.concat(list.map(x => x.row))));
+    ].sort((a, b) => a.sort.localeCompare(b.sort)).map(x => x.row);
+  }
+  const download = (res, type, file) => res.set({
+    'Content-Type': type, 'Content-Disposition': `attachment; filename="${file}"`, 'Cache-Control': 'no-store',
+  });
+
+  // CSV: ";" and "12,50" — opens in columns in Spanish/Turkish Excel; used for import too
+  app.get(fin + '/export.csv', requireAdmin, (req, res) => {
+    const month = MONTH_RE.test(req.query.month || '') ? req.query.month : null;
+    const rows = exportRows(month).map(r => r.map((v, i) => (i === 3 ? csvAmount(v) : v)));
+    download(res, 'text/csv; charset=utf-8', `vornetic-finans-${month || 'tumu'}.csv`);
+    res.send(toCsv([EXPORT_HEADER, ...rows]));
+  });
+
+  // Excel (.xlsx): opens the same way in every Excel language; amounts are real numbers.
+  // Text that starts like a formula keeps the same leading ' as in the CSV, so a sheet saved
+  // back to CSV and imported is recognised as already saved (see csvCell / readImport).
+  app.get(fin + '/export.xlsx', requireAdmin, (req, res) => {
+    const month = MONTH_RE.test(req.query.month || '') ? req.query.month : null;
+    const text = v => { const s = String(v ?? ''); return /^[=+\-@\t\r']/.test(s) ? "'" + s : s; };
+    const rows = exportRows(month).map(r => r.map((v, i) => (i === 3 ? v / 100 : i === 0 ? (v === '' ? '' : String(v)) : text(v))));
+    download(res, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', `vornetic-finans-${month || 'tumu'}.xlsx`);
+    res.send(writeXlsx([EXPORT_HEADER, ...rows], {
+      numberCols: [3], widths: [6, 11, 12, 12, 24, 36, 8, 24, 16], sheetName: month ? `Finans ${month}` : 'Finans',
+    }));
   });
 
   // Import: { csv: "...", dry_run: true } shows what would happen (nothing saved). Without
