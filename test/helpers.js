@@ -165,9 +165,11 @@ async function fakeSmtp() {
 // answerId / answerRef let a test make Stripe answer with a different session or order.
 // chargeCreated (Unix seconds) = when Stripe took the money: returned as the successful charge
 // when the request expands payment_intent.latest_charge. state.getUrls lists every GET URL.
+// POST .../expire closes an open, unpaid page (state.expires counts the calls); it is refused
+// otherwise, or always when the session has expireFail set.
 async function fakeStripe() {
   const http = require('node:http');
-  const state = { sessions: {}, creates: 0, gets: 0, getUrls: [] };
+  const state = { sessions: {}, creates: 0, gets: 0, getUrls: [], expires: 0 };
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', d => { body += d; });
@@ -178,6 +180,16 @@ async function fakeStripe() {
         const id = 'cs_test_' + (++state.creates);
         state.sessions[id] = { ref: params.client_reference_id, params, status: 'open', payment_status: 'unpaid' };
         return send(200, { id, url: 'https://checkout.example.test/pay/' + id });
+      }
+      const x = req.url.match(/^\/v1\/checkout\/sessions\/(\w+)\/expire$/);
+      if (req.method === 'POST' && x) {
+        state.expires++;
+        const s = state.sessions[x[1]];
+        if (!s) return send(404, { error: { message: 'No such checkout session' } });
+        if (s.expireFail) return send(500, { error: { message: 'fake Stripe error on expire' } });
+        if (s.status !== 'open' || s.payment_status !== 'unpaid') return send(400, { error: { message: 'Only open sessions can be expired' } });
+        s.status = 'expired';
+        return send(200, { id: x[1], status: 'expired', payment_status: 'unpaid' });
       }
       const m = req.url.match(/^\/v1\/checkout\/sessions\/(\w+)(\?.*)?$/);
       if (req.method === 'GET' && m) {

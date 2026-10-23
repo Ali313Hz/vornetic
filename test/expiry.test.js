@@ -779,3 +779,150 @@ test('outbox: a cancellation e-mail that failed is sent for a new cancellation a
     assert.match(s.smtp.text(before), /no hemos recibido el pago/);
   } finally { await s.close(); }
 });
+
+// ---------- Card orders cancelled by the admin (Codex P1) ----------
+test('card cancelled by the admin: payment page closed; a payment made anyway is still recorded, refund due, in Finance', async () => {
+  const s = await shop();
+  try {
+    // a) unpaid, page still open → closed at Stripe; once Stripe is final it is not asked again
+    const a = await s.order('card', 2);
+    await settled(s);
+    assert.strictEqual((await s.srv.setOrder(a, { status: 'cancelled' })).status, 200);
+    assert.strictEqual(s.stock(), 10);
+    assert.ok(await until(() => s.sessionOf(a).status === 'expired'), 'payment page closed at Stripe');
+    await s.expire();
+    assert.ok(s.get(a).stripe_done_at, 'Stripe is final: expired, unpaid');
+    const gets = s.stripe.state.gets;
+    await s.expire();
+    assert.strictEqual(s.stripe.state.gets, gets, 'not asked again');
+
+    // b) the customer paid just before the cancel (the page can't be closed any more) and never came back
+    const b = await s.order('card', 3);
+    Object.assign(s.sessionOf(b), { status: 'complete', payment_status: 'paid' });
+    await settled(s);
+    assert.strictEqual((await s.srv.setOrder(b, { status: 'cancelled' })).status, 200);
+    assert.strictEqual(s.stock(), 10);
+    const r = await s.expire();
+    assert.deepStrictEqual(r.paid, [b], 'the Stripe check finds the payment on the cancelled order');
+    const o = s.get(b);
+    assert.deepStrictEqual([o.status, o.paid_via, !!o.paid_at, !!o.stripe_done_at], ['cancelled', 'stripe', true, true]);
+    assert.strictEqual(s.stock(), 10, 'stock not taken again');
+    const v = await s.view(b);
+    assert.deepStrictEqual([v.needs_refund, v.refund_due_cents], [1, o.total_cents], 'refund due');
+    assert.ok(await until(() => s.mail(b, 'charged_after_cancel')?.state === 'sent' && s.mail(b, 'shop_charged_after_cancel')?.state === 'sent'));
+    assert.strictEqual(s.mail(b, 'confirmation'), undefined, 'never "order confirmed"');
+    const fin = async () => (await s.srv.admin('GET', '/api/admin/finance')).body.web;
+    assert.strictEqual((await fin()).payments_cents, o.total_cents, 'the money is in Finance');
+    assert.strictEqual((await s.srv.refund(b, o.total_cents)).status, 200);
+    assert.deepStrictEqual([(await fin()).refunds_cents, (await s.view(b)).needs_refund], [o.total_cents, 0]);
+
+    // c) closing the page fails at Stripe: not relied on — the order stays watched and a later payment is recorded
+    const c = await s.order('card', 1);
+    s.sessionOf(c).expireFail = true;
+    assert.strictEqual((await s.srv.setOrder(c, { status: 'cancelled' })).status, 200);
+    await s.expire();
+    assert.strictEqual(s.get(c).stripe_done_at, null, 'still watched');
+    Object.assign(s.sessionOf(c), { status: 'complete', payment_status: 'paid' });
+    assert.deepStrictEqual((await s.expire()).paid, [c]);
+    assert.deepStrictEqual([s.get(c).status, !!s.get(c).paid_at], ['cancelled', true]);
+  } finally { await s.close(); }
+});
+
+// ---------- Cancelling a paid card order (Codex P2) ----------
+test('cancelling a paid card order drops its unsent "payment received" e-mails; while one is being sent → 409', async () => {
+  const s = await shop();
+  try {
+    const a = await s.order('card'), b = await s.order('card');
+    const pay = async ref => {
+      Object.assign(s.sessionOf(ref), { status: 'complete', payment_status: 'paid' });
+      assert.strictEqual((await s.srv.call('POST', '/api/orders/confirm', { ref, session_id: s.get(ref).stripe_session })).body.paid, true);
+    };
+    await settled(s);
+    s.smtp.ctl.reject = /./;                                            // the confirmations wait for a retry
+    await pay(a);
+    assert.ok(await until(() => s.mail(a, 'confirmation')?.tries >= 1 && s.mail(a, 'shop_new_order')?.tries >= 1));
+    assert.strictEqual((await setOrderSoon(s, a, { status: 'cancelled' })).status, 200);
+    assert.deepStrictEqual([s.mail(a, 'confirmation').state, s.mail(a, 'shop_new_order').state], ['dropped', 'dropped']);
+    assert.strictEqual((await s.view(a)).needs_refund, 1, 'paid and cancelled: refund due');
+    s.smtp.ctl.reject = null;
+    const before = await settled(s);
+    await s.expire();
+    await sleep(500);
+    assert.strictEqual(s.smtp.messages.length, before, 'no "payment received" after the cancellation');
+
+    s.smtp.ctl.delayMs = 1500;                                          // now the confirmation is on its way
+    await pay(b);
+    assert.ok(await until(() => s.mail(b, 'confirmation')?.state === 'sending'));
+    const stock = s.stock();
+    const r = await s.srv.setOrder(b, { status: 'cancelled' });
+    assert.strictEqual(r.status, 409, 'cancelling waits for the e-mail on its way');
+    assert.deepStrictEqual([s.get(b).status, s.stock()], ['paid', stock], 'nothing changed');
+    s.smtp.ctl.delayMs = 0;
+  } finally { await s.close(); }
+});
+
+// ---------- Every overdue order is reachable (Codex P2) ----------
+test('every overdue order can be listed, even when there are more than 500 newer orders', async () => {
+  const s = await shop();
+  try {
+    const old = [await s.order('bizum'), await s.order('transfer'), await s.order('bizum')];
+    for (const ref of old) s.age(ref, '-10 days');
+    const newer = await s.order('transfer');
+    const d = new DatabaseSync(path.join(s.srv.dataDir, 'store.db'));
+    try {
+      const cols = d.prepare('PRAGMA table_info(orders)').all().map(c => c.name).filter(c => c !== 'id' && c !== 'ref').join(', ');
+      for (let i = 0; i < 505; i++) d.prepare(`INSERT INTO orders (ref, ${cols}) SELECT ?, ${cols} FROM orders WHERE ref = ?`).run(`VN-NEW${i}`, newer);
+    } finally { d.close(); }
+    await s.expire();
+    assert.strictEqual((await s.srv.admin('GET', '/api/admin/me')).body.overdue_orders, 3);
+    const pending = (await s.srv.admin('GET', '/api/admin/orders?status=pending')).body;
+    assert.strictEqual(pending.length, 500);
+    assert.ok(!pending.some(o => old.includes(o.ref)), '(the newest 500 do not include them)');
+    const overdue = (await s.srv.admin('GET', '/api/admin/orders?status=overdue')).body;
+    assert.deepStrictEqual(overdue.map(o => o.ref), old, 'all of them, oldest first');
+    assert.strictEqual((await s.cancelUnpaid(old[0])).status, 200);
+    assert.strictEqual((await s.srv.admin('GET', '/api/admin/me')).body.overdue_orders, 2);
+    assert.deepStrictEqual((await s.srv.admin('GET', '/api/admin/orders?status=overdue')).body.map(o => o.ref), old.slice(1));
+    assert.strictEqual((await s.srv.call('GET', '/api/admin/orders?status=overdue')).status, 401);
+  } finally { await s.close(); }
+});
+
+// ---------- Nearby races found in the audit ----------
+test('race: the customer returns from Stripe while the admin cancels → paid on a cancelled order, refund due, no "order confirmed"', async () => {
+  const s = await shop();
+  try {
+    const ref = await s.order('card', 2);
+    Object.assign(s.sessionOf(ref), { status: 'complete', payment_status: 'paid', delayMs: 700 });
+    const before = await settled(s);
+    const confirming = s.srv.call('POST', '/api/orders/confirm', { ref, session_id: s.get(ref).stripe_session });
+    await sleep(200);
+    assert.strictEqual((await s.srv.setOrder(ref, { status: 'cancelled' })).status, 200);
+    const c = await confirming;
+    assert.deepStrictEqual([c.body.status, c.body.paid], ['cancelled', true]);
+    assert.strictEqual(s.stock(), 10, 'stock returned once');
+    assert.strictEqual((await s.view(ref)).needs_refund, 1);
+    assert.ok(await until(() => s.mail(ref, 'charged_after_cancel')?.state === 'sent' && s.mail(ref, 'shop_charged_after_cancel')?.state === 'sent'));
+    assert.strictEqual(s.mail(ref, 'confirmation'), undefined);
+    await sleep(300);
+    assert.strictEqual(s.smtp.messages.length, before + 2, '"paid after cancelling" to customer and shop, once (setOrder sends no status e-mail)');
+  } finally { await s.close(); }
+});
+
+test('an admin payment undone on a card order really paid at Stripe: the check records the Stripe payment, no second confirmation', async () => {
+  const s = await shop();
+  try {
+    const ref = await s.order('card');
+    await settled(s);
+    assert.strictEqual((await s.srv.setOrder(ref, { status: 'paid' })).status, 200);       // marked paid by hand
+    assert.ok(await until(() => s.mail(ref, 'confirmation')?.state === 'sent' && s.mail(ref, 'shop_new_order')?.state === 'sent'));
+    Object.assign(s.sessionOf(ref), { status: 'complete', payment_status: 'paid' });       // it was in fact paid at Stripe
+    assert.strictEqual((await setOrderSoon(s, ref, { status: 'pending' })).status, 200);   // the admin undoes it
+    assert.strictEqual(s.get(ref).paid_at, null);
+    s.age(ref, '-3 hours');
+    const before = await settled(s);
+    assert.deepStrictEqual((await s.expire()).paid, [ref]);
+    assert.deepStrictEqual([s.get(ref).status, s.get(ref).paid_via], ['paid', 'stripe']);
+    await sleep(500);
+    assert.strictEqual(s.smtp.messages.length, before, 'the confirmation already went out once: not again');
+  } finally { await s.close(); }
+});

@@ -423,7 +423,7 @@ function recordPayment(orderId, via, { at = null, estimated = false } = {}) {
 const MAIL_KINDS = {
   // "paid, order confirmed": never once the payment is undone (or the order cancelled)
   confirmation: { send: (o, s, base) => mail.orderConfirmation(o, s, base), still: "o.status <> 'cancelled' AND o.paid_at IS NOT NULL" },
-  shop_new_order: { send: (o, s, base) => mail.shopNewOrder(o, s, base), shop: true, still: 'o.paid_at IS NOT NULL' },
+  shop_new_order: { send: (o, s, base) => mail.shopNewOrder(o, s, base), shop: true, still: "o.status <> 'cancelled' AND o.paid_at IS NOT NULL" },
   // "paid after cancelling, will not ship, refund": never once the order is reinstated
   charged_after_cancel: { send: (o, s) => mail.chargedAfterCancel(o, s), still: "o.status = 'cancelled' AND o.paid_at IS NOT NULL" },
   shop_charged_after_cancel: { send: (o, s, base) => mail.shopChargedAfterCancel(o, s, base), shop: true, still: "o.status = 'cancelled' AND o.paid_at IS NOT NULL" },
@@ -449,7 +449,7 @@ function queueMail(orderId, kind) {
 // a later event can queue it again), and refuses (409) while one is being sent — try again a few
 // seconds later.
 const CANCELLED_MAILS = ['expired', 'charged_after_cancel', 'shop_charged_after_cancel'];   // untrue once reinstated
-const PAID_MAILS = ['confirmation', 'shop_new_order'];                                       // untrue once the payment is undone
+const PAID_MAILS = ['confirmation', 'shop_new_order'];                                       // untrue once the payment is undone or the order cancelled
 function dropMails(orderId, kinds) {
   const list = kinds.map(() => '?').join(', ');
   const busy = db.prepare(`SELECT 1 FROM mail_outbox WHERE order_id = ? AND kind IN (${list}) AND state = 'sending'
@@ -545,9 +545,13 @@ async function runExpiry() {
   out.overdue = db.prepare(`SELECT ref FROM orders WHERE status = 'pending' AND paid_at IS NULL AND overdue_at IS NOT NULL
       AND payment_method IN ('bizum', 'transfer') ORDER BY id`).all().map(o => o.ref);
 
-  const cards = db.prepare(`SELECT id, ref, stripe_session FROM orders WHERE status = 'pending' AND paid_at IS NULL
-      AND payment_method = 'card' AND created_at <= datetime('now', ?)
+  // Unpaid card orders: pending ones older than 2 hours, and cancelled ones whose payment page
+  // Stripe hasn't closed for good yet (the customer may have paid after the admin cancelled)
+  const cards = db.prepare(`SELECT id, ref, status, stripe_session FROM orders WHERE paid_at IS NULL AND payment_method = 'card'
+      AND ((status = 'pending' AND created_at <= datetime('now', ?))
+        OR (status = 'cancelled' AND stripe_session IS NOT NULL AND stripe_done_at IS NULL))
       ORDER BY stripe_checked_at IS NOT NULL, stripe_checked_at, id LIMIT ?`).all(`-${CARD_CHECK_AFTER_MINUTES} minutes`, EXPIRY_BATCH);
+  const stripeDone = id => db.prepare("UPDATE orders SET stripe_done_at = datetime('now') WHERE id = ?").run(id);
   for (const [n, o] of cards.entries()) {
     if (Date.now() > deadline) { out.left = cards.length - n; break; }
     const skip = reason => out.skipped.push({ ref: o.ref, reason });
@@ -559,16 +563,25 @@ async function runExpiry() {
     catch (e) { skip('Stripe check failed: ' + e.message); continue; }
     if (!sess || sess.id !== o.stripe_session || sess.client_reference_id !== o.ref) { skip('Stripe answer does not match this order'); continue; }
     if (sess.payment_status === 'paid') {
-      // without Stripe's payment time, "now" may be hours late: marked as estimated
-      const paid = inTransaction(() => recordPayment(o.id, 'stripe', { at: stripePaidAt(sess), estimated: true }));
-      if (paid) out.paid.push(o.ref);       // its confirmation e-mails are queued (sent below, retried if they fail)
+      // without Stripe's payment time, "now" may be hours late: marked as estimated. A cancelled order
+      // stays cancelled: it then shows "refund due" and both sides get the "paid after cancelling" e-mail.
+      const paid = inTransaction(() => {
+        const p = recordPayment(o.id, 'stripe', { at: stripePaidAt(sess), estimated: true });
+        if (p) stripeDone(o.id);
+        return p;
+      });
+      if (paid) out.paid.push(o.ref);       // its e-mails are queued (sent below, retried if they fail)
       continue;
     }
     if (sess.status === 'expired' && sess.payment_status === 'unpaid') {
-      if (autoCancel(o.id, 'card_checkout_expired')) out.cancelled.push(o.ref);
+      if (o.status === 'cancelled') { stripeDone(o.id); continue; }   // can no longer be paid: nothing to watch
+      if (autoCancel(o.id, 'card_checkout_expired')) { stripeDone(o.id); out.cancelled.push(o.ref); }
       else skip('changed while checking');
       continue;
     }
+    // cancelled but the payment page is still open: close it (if the customer pays first, Stripe
+    // refuses and the next run records the payment)
+    if (o.status === 'cancelled' && sess.status === 'open') expireStripeSession(o.stripe_session);
     skip(`Stripe: ${sess.status || 'unknown'} / ${sess.payment_status || 'unknown'}`);
   }
   flushMails();
@@ -706,6 +719,13 @@ async function stripe(method, url, params) {
   if (!r.ok) throw new Error(data.error?.message || 'Stripe error');
   return data;
 }
+// Close a card order's Stripe payment page (best effort, never inside a transaction): used when the
+// order is cancelled. Stripe refuses if the customer has just paid; the Stripe check then records it.
+function expireStripeSession(id) {
+  if (!STRIPE_KEY || !id) return Promise.resolve(false);
+  return stripe('POST', `/v1/checkout/sessions/${encodeURIComponent(id)}/expire`)
+    .then(() => true, e => { console.error('Could not close the Stripe payment page:', e.message); return false; });
+}
 // A Checkout Session, with its payment and charge, so we know when the money was actually taken
 function stripeSession(id) {
   return stripe('GET', `/v1/checkout/sessions/${encodeURIComponent(id)}?expand[]=payment_intent.latest_charge`);
@@ -787,7 +807,7 @@ app.post('/api/admin/logout', (req, res) => {
 app.get('/api/admin/me', requireAdmin, (req, res) => res.json({
   ok: true, stripe: !!STRIPE_KEY, mail: mail.enabled,
   open_withdrawals: db.prepare('SELECT COUNT(*) c FROM withdrawals WHERE handled = 0').get().c,
-  overdue_orders: db.prepare("SELECT COUNT(*) c FROM orders WHERE overdue_at IS NOT NULL AND status = 'pending' AND paid_at IS NULL").get().c,
+  overdue_orders: db.prepare(`SELECT COUNT(*) c FROM orders WHERE ${OVERDUE}`).get().c,
   upload: { photo_mb: MAX_PHOTO_MB, video_mb: MAX_VIDEO_MB, photo_ext: IMG_EXT, video_ext: VID_EXT },
 }));
 app.post('/api/admin/test-mail', requireAdmin, async (req, res) => {
@@ -994,8 +1014,12 @@ const ORDER_COLS = `orders.*, (SELECT COUNT(*) FROM withdrawals w WHERE w.order_
      FROM (SELECT * FROM refunds WHERE order_id = orders.id ORDER BY id) r) AS refunds,
   (SELECT json_group_array(json_object('answer', c.answer, 'created_at', c.created_at))
      FROM (SELECT * FROM payment_checks WHERE order_id = orders.id ORDER BY id) c) AS payment_checks`;
+// Bizum/transfer orders more than 5 days unpaid, for the admin to check (the Orders tab badge counts these)
+const OVERDUE = "status = 'pending' AND paid_at IS NULL AND overdue_at IS NOT NULL";
 app.get('/api/admin/orders', requireAdmin, (req, res) => {
   const st = req.query.status;
+  // ?status=overdue: every overdue order, oldest first (they are the oldest: the newest 500 may not include them)
+  if (st === 'overdue') return res.json(db.prepare(`SELECT ${ORDER_COLS} FROM orders WHERE ${OVERDUE} ORDER BY id LIMIT 500`).all());
   const rows = STATUSES.includes(st)
     ? db.prepare(`SELECT ${ORDER_COLS} FROM orders WHERE status = ? ORDER BY id DESC LIMIT 500`).all(st)
     : db.prepare(`SELECT ${ORDER_COLS} FROM orders ORDER BY id DESC LIMIT 500`).all();
@@ -1058,7 +1082,7 @@ app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
     inTransaction(() => {
       // reinstating: "cancelled" e-mails that haven't left yet must not go; undoing a payment: nor "paid" ones
       if (status !== 'cancelled') dropMails(o.id, CANCELLED_MAILS);
-      if (undoManualPayment) dropMails(o.id, PAID_MAILS);
+      if (undoManualPayment || (status === 'cancelled' && o.status !== 'cancelled')) dropMails(o.id, PAID_MAILS);
       // Put stock back when an order is cancelled, take it again if un-cancelled (only if there is enough)
       if (status !== o.status && status === 'cancelled') returnStock(JSON.parse(o.items));
       if (status !== o.status && o.status === 'cancelled')
@@ -1076,6 +1100,9 @@ app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
     return res.status(e.status || 400).json({ error: e.message });
   }
   if (newlyPaid) flushMails();
+  // An unpaid card order was cancelled: close its Stripe payment page so it can't be paid any more.
+  // (Not relied on: the Stripe check keeps watching cancelled card orders until Stripe is final.)
+  if (status === 'cancelled' && o.status !== 'cancelled' && o.payment_method === 'card' && !o.paid_at) expireStripeSession(o.stripe_session);
   // Tell the customer when the order is paid, shipped or cancelled
   let mailed = false;
   if (status !== o.status && b.notify !== false && ['paid', 'shipped', 'cancelled'].includes(status)) {

@@ -149,6 +149,9 @@ for (const sql of [
   // A Bizum/transfer payment that arrived after the order was cancelled: when the admin recorded it
   // (paid_at = the day the money arrived; the order stays cancelled and a refund is due)
   'ALTER TABLE orders ADD COLUMN late_payment_recorded_at TEXT',
+  // Set once Stripe has given a final answer for the card order's payment page (paid, or expired
+  // unpaid): a cancelled card order is checked with Stripe until then, in case the customer paid anyway
+  'ALTER TABLE orders ADD COLUMN stripe_done_at TEXT',
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 
 // Payment date. Runs once, when the column is added. Orders already paid/shipped/delivered get
