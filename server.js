@@ -459,23 +459,28 @@ function dropMails(orderId, kinds) {
 }
 
 // Send what is queued. One sender at a time; e-mails queued while it runs get one more pass right
-// after. No database transaction is open while waiting for the mail server: each e-mail is first
-// claimed ('sending', one statement that also checks "still"), then sent, then marked.
+// after. Each e-mail is tried at most once per run ("tried"): one that just failed waits for the next
+// run instead of being retried at once by that extra pass. No database transaction is open while
+// waiting for the mail server: each e-mail is first claimed ('sending', one statement that also
+// checks "still"), then sent, then marked.
 let mailRun = null, mailAgain = false;
 function flushMails() {
   if (mailRun) { mailAgain = true; return mailRun; }
+  const tried = new Set();
   mailRun = (async () => {
-    do { mailAgain = false; await sendQueuedMails(); } while (mailAgain);
+    do { mailAgain = false; await sendQueuedMails(tried); } while (mailAgain);
   })().catch(e => console.error('Queued e-mails failed:', e.message)).finally(() => { mailRun = null; });
   return mailRun;
 }
-async function sendQueuedMails() {
+async function sendQueuedMails(tried) {
   if (!mail.enabled) return;
   // a send that never finished (the server stopped mid-send): try again — rarely, a duplicate
   db.prepare("UPDATE mail_outbox SET state = 'due', claimed_at = NULL WHERE state = 'sending' AND claimed_at <= datetime('now', ?)").run(MAIL_IN_FLIGHT);
   const s = getSettings(), base = PUBLIC_URL || `http://localhost:${PORT}`;
   // least-tried first: new e-mails are never stuck behind ones that keep failing
   for (const m of db.prepare("SELECT id, kind FROM mail_outbox WHERE state = 'due' ORDER BY tries, id LIMIT 50").all()) {
+    if (tried.has(m.id)) continue;
+    tried.add(m.id);
     const k = MAIL_KINDS[m.kind];
     if (!k) { db.prepare("UPDATE mail_outbox SET state = 'failed' WHERE id = ?").run(m.id); continue; }
     const still = `EXISTS (SELECT 1 FROM orders o WHERE o.id = mail_outbox.order_id AND ${k.still || '1'})`;

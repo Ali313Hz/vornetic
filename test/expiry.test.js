@@ -165,7 +165,8 @@ test('a failed cancellation e-mail is kept and sent on a later run; un-cancel st
     const before = await settled(s);
     s.smtp.ctl.reject = /buyer@example\.test/;                         // the mail server refuses for now
     for (const ref of [a, b]) assert.strictEqual((await s.cancelUnpaid(ref)).status, 200);
-    assert.ok(await until(() => s.mail(a, 'expired').tries >= 1 && s.mail(b, 'expired').tries >= 1), 'both tried once');
+    // wait until both have been refused and are queued again (a send run may still be retrying one)
+    assert.ok(await until(() => [a, b].every(ref => s.mail(ref, 'expired').tries >= 1 && s.mail(ref, 'expired').state === 'due')), 'both tried, kept for a retry');
     assert.deepStrictEqual([s.mail(a, 'expired').state, s.mail(b, 'expired').state], ['due', 'due'], 'kept for a retry');
     assert.strictEqual(s.smtp.messages.length, before);
 
@@ -323,8 +324,11 @@ test('card: payment found by the check while the mail server fails → payment k
     assert.deepStrictEqual(r.paid, [found]);
     const c = await s.srv.call('POST', '/api/orders/confirm', { ref: back, session_id: s.get(back).stripe_session });
     assert.strictEqual(c.body.paid, true, 'the customer returning from Stripe is unaffected');
+    // two events started send runs (the check, the customer's return): wait until both runs are over,
+    // i.e. all four e-mails were refused and are queued for a retry — not a snapshot taken mid-retry
+    const queued = ref => ['confirmation', 'shop_new_order'].every(k => s.mail(ref, k)?.tries >= 1 && s.mail(ref, k).state === 'due');
+    assert.ok(await until(() => [found, back].every(queued)), 'all four refused and queued for a retry');
     for (const ref of [found, back]) {
-      assert.ok(await until(() => s.mail(ref, 'confirmation')?.tries >= 1 && s.mail(ref, 'shop_new_order')?.tries >= 1), ref);
       assert.deepStrictEqual([s.mail(ref, 'confirmation').state, s.mail(ref, 'shop_new_order').state], ['due', 'due']);
       assert.deepStrictEqual([s.get(ref).status, s.get(ref).paid_via], ['paid', 'stripe'], 'payment kept');
     }
@@ -990,5 +994,26 @@ test('race: reinstating while the Stripe check is closing the page waits (409); 
     await s.expire();
     assert.ok(s.get(ref).stripe_done_at, 'Stripe is final');
     assert.strictEqual(s.stock(), 10);
+  } finally { await s.close(); }
+});
+
+// ---------- One attempt per e-mail per send run (Node 22 CI flake on 486725d) ----------
+test('outbox: an e-mail that just failed is not retried at once when more mail is queued during the same send run', async () => {
+  const s = await shop();
+  try {
+    const a = await s.order('card'), b = await s.order('card');
+    const pay = async ref => {
+      Object.assign(s.sessionOf(ref), { status: 'complete', payment_status: 'paid' });
+      assert.strictEqual((await s.srv.call('POST', '/api/orders/confirm', { ref, session_id: s.get(ref).stripe_session })).body.paid, true);
+    };
+    await settled(s);
+    Object.assign(s.smtp.ctl, { reject: /./, rejectDelayMs: 400 });   // the mail server refuses, slowly
+    await pay(a);                                                       // a's two e-mails: a send run starts
+    assert.ok(await until(() => s.mail(a, 'confirmation')?.state === 'sending'), "a's confirmation is being tried");
+    await pay(b);                                                       // more mail queued while that run is busy
+    const settledAll = () => [a, b].every(ref => ['confirmation', 'shop_new_order'].every(k => s.mail(ref, k)?.state === 'due' && s.mail(ref, k).tries >= 1));
+    assert.ok(await until(settledAll, 10000), 'all four refused and queued for the next run');
+    assert.deepStrictEqual([a, b].flatMap(ref => ['confirmation', 'shop_new_order'].map(k => s.mail(ref, k).tries)), [1, 1, 1, 1],
+      'each tried once in this run: a failed one waits for the next run');
   } finally { await s.close(); }
 });

@@ -117,7 +117,8 @@ function oldDatabase(dir, orders) {
 // Fake SMTP server on 127.0.0.1 that accepts everything and keeps the messages.
 // env: the SMTP_* settings to give startServer. text(i): message i, quoted-printable decoded.
 // ctl.reject = /regex/ makes it refuse recipients whose RCPT TO line matches, like a failing mail server.
-// ctl.delayMs keeps each message "in flight" that long before accepting it (ctl.inFlight counts them).
+// ctl.delayMs keeps each message "in flight" that long before accepting it (ctl.inFlight counts them);
+// ctl.rejectDelayMs makes a refusal (ctl.reject) arrive that late.
 async function fakeSmtp() {
   const messages = [], sockets = new Set(), ctl = { reject: null, delayMs: 0, inFlight: 0 };
   const server = net.createServer(sock => {
@@ -136,7 +137,11 @@ async function fakeSmtp() {
           continue;
         }
         const line = buf.slice(0, i); buf = buf.slice(i + 2);
-        if (/^RCPT TO/i.test(line) && ctl.reject && ctl.reject.test(line)) { rejected = true; sock.write('550 fake rejection\r\n'); continue; }
+        if (/^RCPT TO/i.test(line) && ctl.reject && ctl.reject.test(line)) {
+          rejected = true;
+          if (ctl.rejectDelayMs) setTimeout(() => sock.write('550 fake rejection\r\n'), ctl.rejectDelayMs); else sock.write('550 fake rejection\r\n');
+          continue;
+        }
         if (/^DATA/i.test(line) && rejected) { rejected = false; sock.write('554 no valid recipients\r\n'); continue; }
         if (login) { login--; sock.write(login ? '334 UGFzc3dvcmQ6\r\n' : '235 ok\r\n'); }
         else if (/^EHLO/i.test(line)) sock.write('250-fake.example.test\r\n250 AUTH PLAIN LOGIN\r\n');
