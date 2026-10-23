@@ -212,7 +212,8 @@ function test(s) {
   return send(s.shop_email, 'Vornetic — test e-mail', layout('<p>E-posta ayarları çalışıyor ✔</p>', s));
 }
 
-// A Bizum/transfer order was cancelled automatically: no payment within 5 days (terms of sale)
+// A Bizum/transfer order was cancelled for non-payment within 5 days (terms of sale), after the
+// admin checked the bank/Bizum. Returns true if the mail server accepted it (see flushExpiryMails).
 function orderExpired(o, s) {
   const t = T(o.lang);
   return send(o.email, t.expired_subject(o.ref), layout(`<p>${t.hello(esc(o.customer_name))}</p><p>${t.expired_intro}</p>

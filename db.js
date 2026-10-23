@@ -141,6 +141,14 @@ for (const sql of [
   // ('unpaid_5_days' = Bizum/transfer not paid in 5 days, 'card_checkout_expired' = Stripe page expired unpaid)
   'ALTER TABLE orders ADD COLUMN auto_cancelled_at TEXT',
   'ALTER TABLE orders ADD COLUMN auto_cancel_reason TEXT',
+  // Set when a Bizum/transfer order is still unpaid after 5 days. Nothing is cancelled automatically:
+  // the admin checks the bank/Bizum and either marks it paid or confirms the cancellation.
+  'ALTER TABLE orders ADD COLUMN overdue_at TEXT',
+  // Last time an unpaid card order was checked with Stripe (the check goes oldest-checked first)
+  'ALTER TABLE orders ADD COLUMN stripe_checked_at TEXT',
+  // "Payment not received, order cancelled" e-mail: 'due' (to send / retry), 'sent', or 'failed' (gave up)
+  'ALTER TABLE orders ADD COLUMN expiry_mail TEXT',
+  'ALTER TABLE orders ADD COLUMN expiry_mail_tries INTEGER NOT NULL DEFAULT 0',
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 
 // Payment date. Runs once, when the column is added. Orders already paid/shipped/delivered get

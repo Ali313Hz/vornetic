@@ -72,7 +72,8 @@ async function start() {
 }
 function drawTabs() {
   $('#tabs').innerHTML = Object.entries(TABS).map(([k, v]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}">${v}${
-    k === 'withdrawals' && ME.open_withdrawals ? ` <span class="badge" style="position:static;display:inline-grid">${ME.open_withdrawals}</span>` : ''}</button>`).join('');
+    k === 'withdrawals' && ME.open_withdrawals ? ` <span class="badge" style="position:static;display:inline-grid">${ME.open_withdrawals}</span>` : ''}${
+    k === 'orders' && ME.overdue_orders ? ` <span class="badge" style="position:static;display:inline-grid" title="5 günü geçmiş, ödemesi kontrol edilecek">${ME.overdue_orders}</span>` : ''}</button>`).join('');
 }
 async function refreshMe() { try { ME = await api('/api/admin/me'); drawTabs(); } catch {} }
 $('#tabs').addEventListener('click', e => { const b = e.target.closest('[data-t]'); if (b) { tab = b.dataset.t; drawTabs(); show(); } });
@@ -133,6 +134,19 @@ function bindOrderCards(scope, after = show) {
         toast('Kaydedildi'); after();
       } catch (e) { toast(e.message); }
     }));
+    // Overdue Bizum/transfer order: the admin checked the bank/Bizum
+    $('.odpaid', el)?.addEventListener('click', async () => {
+      if (!confirm('Ödeme banka/Bizum hesabına geldi mi? Sipariş "Ödendi" yapılacak.')) return;
+      try { await send('/api/admin/orders/' + el.dataset.id, { status: 'paid' }); toast('Ödendi olarak kaydedildi'); refreshMe(); after(); }
+      catch (e) { toast(e.message); }
+    });
+    $('.odcancel', el)?.addEventListener('click', async () => {
+      if (!confirm('Ödeme gelmedi mi? Sipariş iptal edilecek, stok geri eklenecek ve müşteriye e-posta gidecek.')) return;
+      try {
+        const r = await send(`/api/admin/orders/${el.dataset.id}/cancel-unpaid`, { confirm: true }, 'POST');
+        toast(r.mail ? 'İptal edildi · müşteriye e-posta gönderiliyor' : 'İptal edildi · e-posta kapalı, müşteriye kendin haber ver'); refreshMe(); after();
+      } catch (e) { toast(e.message); }
+    });
     $('[data-cust]', el)?.addEventListener('click', () => { tab = 'customers'; drawTabs(); viewCustomer(+$('[data-cust]', el).dataset.cust); });
   });
 }
@@ -140,11 +154,14 @@ function waUrl(phone, text) {
   const p = (phone || '').replace(/[^\d]/g, '');
   return p ? `https://wa.me/${p.length === 9 ? '34' + p : p}?text=${encodeURIComponent(text)}` : '';
 }
-// Why an order was cancelled automatically (server: expireUnpaidOrders)
+// Why an order was cancelled for non-payment (server: expireUnpaidOrders, cancel-unpaid)
 const AUTO_CANCEL = {
-  unpaid_5_days: 'Otomatik iptal: 5 günde ödeme gelmedi',
+  unpaid_5_days: 'İptal: 5 günde ödeme gelmedi',
   card_checkout_expired: 'Otomatik iptal: kart ödemesi tamamlanmadı',
 };
+// The "payment not received" e-mail to the customer (server: flushExpiryMails)
+const EXPIRY_MAIL = { due: '✉ İptal e-postası bekliyor (tekrar denenecek)', failed: '⚠ İptal e-postası gönderilemedi — müşteriye kendin yaz' };
+const isOverdue = o => o.overdue_at && o.status === 'pending' && !o.paid_at;
 // Answers to "was this old cancelled order paid?", oldest first, with a button to correct the latest
 const PCHK = { paid: 'Ödenmişti', unpaid: 'Ödenmemişti' };
 function paymentCheckHtml(o) {
@@ -162,7 +179,7 @@ function orderHtml(o) {
     <div class="order-head">
       <div><b>${esc(o.ref)}</b> · <span class="muted">${esc(day(o.created_at))}</span> · <span class="muted">${esc(o.lang.toUpperCase())}</span>
         ${o.user_id ? ` · <button class="chip-btn small" data-cust="${o.user_id}">kayıtlı müşteri →</button>` : ' · <span class="muted small">misafir</span>'}</div>
-      <div>${refundWarning(o) ? `<span class="status cancelled">${esc(refundWarning(o))}</span> ` : ''}${o.payment_unknown ? '<span class="status pending">⚠ Eski iptal: ödeme durumu bilinmiyor</span> ' : ''}${AUTO_CANCEL[o.auto_cancel_reason] ? `<span class="status cancelled" title="${esc(day(o.auto_cancelled_at))}">${AUTO_CANCEL[o.auto_cancel_reason]}</span> ` : ''}${o.withdrawals ? '<span class="status pending">↩ Cayma talebi</span> ' : ''}<span class="status ${esc(o.status)}">${STATUS[o.status]}</span></div>
+      <div>${refundWarning(o) ? `<span class="status cancelled">${esc(refundWarning(o))}</span> ` : ''}${o.payment_unknown ? '<span class="status pending">⚠ Eski iptal: ödeme durumu bilinmiyor</span> ' : ''}${AUTO_CANCEL[o.auto_cancel_reason] ? `<span class="status cancelled" title="${esc(day(o.auto_cancelled_at))}">${AUTO_CANCEL[o.auto_cancel_reason]}</span> ` : ''}${o.status === 'cancelled' && EXPIRY_MAIL[o.expiry_mail] ? `<span class="status ${o.expiry_mail === 'failed' ? 'cancelled' : 'pending'}">${EXPIRY_MAIL[o.expiry_mail]}</span> ` : ''}${isOverdue(o) ? '<span class="status pending">⏰ 5 gün doldu: ödemeyi kontrol et</span> ' : ''}${o.withdrawals ? '<span class="status pending">↩ Cayma talebi</span> ' : ''}<span class="status ${esc(o.status)}">${STATUS[o.status]}</span></div>
     </div>
     <div class="order-cols">
       <div class="items">${items.map(i => `<div><b>${i.qty}× ${esc(i.name)}</b> — ${eur(i.unit_cents * i.qty)}
@@ -186,6 +203,8 @@ function orderHtml(o) {
     </div>
     ${o.payment_unknown ? `<div class="order-actions"><span class="small">Bu eski iptal sipariş ödenmiş miydi?</span>
       <button class="btn sm ghost" data-pchk="paid">${PCHK.paid}</button><button class="btn sm ghost" data-pchk="unpaid">${PCHK.unpaid}</button></div>` : ''}
+    ${isOverdue(o) ? `<div class="order-actions"><span class="small">5 gün geçti, ödeme kayıtlı değil. Banka/Bizum hesabını kontrol et:</span>
+      <button class="btn sm ghost odpaid">Ödeme geldi</button><button class="btn sm ghost odcancel">Ödeme gelmedi — iptal et</button></div>` : ''}
     ${paymentCheckHtml(o)}
     ${o.paid_at && o.refund_total_cents < o.total_cents ? `<div class="order-actions">
       <input class="in rfd" inputmode="decimal" placeholder="İade € (ör. 12,50)" style="width:150px">
