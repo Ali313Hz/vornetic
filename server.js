@@ -11,12 +11,15 @@ const {
 } = require('./db');
 const mail = require('./mail');
 const catalog = require('./catalog');
+const stripeConfig = require('./stripe');
 
 const app = express();
 const PORT = process.env.PORT || 3300;
 const DEFAULT_ADMIN_PASSWORD = 'vornetic2026';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || '';
+const STRIPE_API = stripeConfig.apiBase();
+if (stripeConfig.overrideIgnored()) console.warn('⚠  STRIPE_API_URL is ignored: it only works in the automated tests. Remove it from .env.');
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -293,6 +296,63 @@ function cleanLine(it) {
   return { id: p.id, name: p.name_en, name_es: p.name_es, qty, unit_cents: unit, options: labels, options_es: labelsEs, car };
 }
 
+// Run fn as one SQLite transaction: either all of its changes are saved or none are
+function inTransaction(fn) {
+  db.exec('BEGIN IMMEDIATE');
+  try { const r = fn(); db.exec('COMMIT'); return r; }
+  catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+// Total quantity per product id (the same product can be on several cart lines)
+function qtyByProduct(items) {
+  const need = new Map();
+  for (const i of items) need.set(i.id, (need.get(i.id) || 0) + i.qty);
+  return need;
+}
+
+// Take an order's items out of stock. Throws (taking nothing) if any product hasn't enough.
+// Products deleted since the order was placed are skipped: there is no stock left to track.
+function takeStock(items, notEnough) {
+  const take = db.prepare('UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?');
+  for (const [id, qty] of qtyByProduct(items)) {
+    if (take.run(qty, id, qty).changes) continue;
+    const p = db.prepare('SELECT name_en, stock FROM products WHERE id = ?').get(id);
+    if (p) throw new Error(notEnough(p, qty));
+  }
+}
+function returnStock(items) {
+  const put = db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?');
+  for (const [id, qty] of qtyByProduct(items)) put.run(qty, id);
+}
+const PAID_STATUSES = ['paid', 'shipped', 'delivered'];
+
+// Record that the money for an order arrived ("via" = 'stripe' or 'admin'). Only the first call
+// for an order changes anything ("AND paid_at IS NULL"), so whoever records the payment first —
+// Stripe's return page or the admin — is the one who sends the card confirmation e-mails, once.
+// A pending order becomes "paid"; any other status (e.g. cancelled) is kept.
+// Returns the updated order if this call recorded the payment, otherwise null.
+function recordPayment(orderId, via) {
+  const r = db.prepare(`UPDATE orders SET paid_at = datetime('now'), paid_at_estimated = 0, paid_via = ?,
+      payment_unknown = 0, status = CASE status WHEN 'pending' THEN 'paid' ELSE status END
+    WHERE id = ? AND paid_at IS NULL`).run(via, orderId);
+  return r.changes ? db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId) : null;
+}
+// Card orders get their confirmation (to the customer) and new-order notice (to the shop) only
+// once paid; other payment methods got them when the order was placed. If the order had been
+// cancelled before the money arrived, both get a "paid, will not ship, refund due" message instead.
+// Called only by whoever recorded the payment (see recordPayment), so each goes out once.
+function cardPaymentMails(o, base) {
+  if (o.payment_method !== 'card') return;
+  const s = getSettings();
+  if (o.status === 'cancelled') {
+    mail.chargedAfterCancel(o, s);
+    mail.shopChargedAfterCancel(o, s, base);
+    return;
+  }
+  mail.orderConfirmation(o, s, base);
+  mail.shopNewOrder(o, s, base);
+}
+
 app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
   const b = req.body || {};
   const s = getSettings();
@@ -317,14 +377,16 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
     const total = subtotal + shipping;
     const ref = newRef();
 
-    const info = db.prepare(`INSERT INTO orders
-      (ref, user_id, customer_name, email, phone, address, city, zip, province, country, notes, items,
-       subtotal_cents, shipping_cents, total_cents, payment_method, lang)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(ref, user ? user.id : null, name, email, phone, address, city, zip, province, country, str(b.notes, 500),
-        JSON.stringify(items), subtotal, shipping, total, method, lang);
-    const dec = db.prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?');
-    for (const i of items) dec.run(i.qty, i.id);
+    // Save the order and take its stock together; not enough stock = no order at all
+    const info = inTransaction(() => {
+      takeStock(items, (p, qty) => `Not enough stock: ${p.name_en} (only ${p.stock} left, you asked for ${qty})`);
+      return db.prepare(`INSERT INTO orders
+        (ref, user_id, customer_name, email, phone, address, city, zip, province, country, notes, items,
+         subtotal_cents, shipping_cents, total_cents, payment_method, lang)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(ref, user ? user.id : null, name, email, phone, address, city, zip, province, country, str(b.notes, 500),
+          JSON.stringify(items), subtotal, shipping, total, method, lang);
+    });
 
     // Remember the address on the customer's account if they have none yet
     if (user && !user.address) {
@@ -333,7 +395,18 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
     }
 
     if (method === 'card') {
-      const session = await stripeCheckout({ ref, email, lang, items, shipping, base: baseUrl(req) });
+      let session;
+      try {
+        session = await stripeCheckout({ ref, email, lang, items, shipping, base: baseUrl(req) });
+      } catch (err) {
+        // No payment page = no sale: cancel the order and give its stock back
+        console.error(`Stripe checkout failed for ${ref}:`, err.message);
+        inTransaction(() => {
+          const r = db.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ? AND status = 'pending'").run(info.lastInsertRowid);
+          if (r.changes) returnStock(items);
+        });
+        throw new Error('Card payment is not available right now. Please try again or choose another payment method.');
+      }
       db.prepare('UPDATE orders SET stripe_session = ? WHERE id = ?').run(session.id, info.lastInsertRowid);
       return res.json({ ok: true, ref, redirect: session.url });   // e-mails are sent once the card payment is confirmed
     }
@@ -364,17 +437,19 @@ app.post('/api/orders/confirm', limit(30, 10 * 60 * 1000), async (req, res) => {
   const o = db.prepare('SELECT * FROM orders WHERE ref = ? AND stripe_session = ?').get(str(ref, 20), str(session_id, 200));
   if (!o) return res.status(404).json({ error: 'Order not found' });
   try {
-    if (o.status === 'pending') {
+    if (!o.paid_at) {
       const sess = await stripe('GET', `/v1/checkout/sessions/${encodeURIComponent(o.stripe_session)}`);
       if (sess.payment_status === 'paid') {
-        db.prepare("UPDATE orders SET status = 'paid' WHERE id = ?").run(o.id);
-        o.status = 'paid';
-        const s = getSettings();
-        mail.orderConfirmation(o, s, baseUrl(req));
-        mail.shopNewOrder(o, s, baseUrl(req));
+        // If the order was cancelled meanwhile it stays cancelled, but the payment is recorded
+        // so the admin sees that a refund is due.
+        const paid = recordPayment(o.id, 'stripe');
+        if (paid) cardPaymentMails(paid, baseUrl(req));
       }
     }
-    res.json({ ok: true, ref: o.ref, status: o.status, total_cents: o.total_cents, payment_method: 'card' });
+    // "paid" (was the money received?) is separate from "status" (what happens to the order):
+    // a cancelled order can still have been charged, and the return page must say so.
+    const now = db.prepare('SELECT status, paid_at FROM orders WHERE id = ?').get(o.id);
+    res.json({ ok: true, ref: o.ref, status: now.status, paid: !!now.paid_at, total_cents: o.total_cents, payment_method: 'card' });
   } catch (e) {
     res.status(502).json({ error: 'Could not verify payment' });
   }
@@ -398,7 +473,7 @@ app.post('/api/withdraw', limit(10, 30 * 60 * 1000), (req, res) => {
 
 // ---------- Stripe (REST, no SDK) ----------
 async function stripe(method, url, params) {
-  const r = await fetch('https://api.stripe.com' + url, {
+  const r = await fetch(STRIPE_API + url, {
     method,
     headers: { Authorization: `Bearer ${STRIPE_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params ? new URLSearchParams(params).toString() : undefined,
@@ -502,11 +577,19 @@ app.put('/api/admin/withdrawals/:id', requireAdmin, (req, res) => {
 
 app.get('/api/admin/stats', requireAdmin, (req, res) => {
   const one = sql => db.prepare(sql).get();
+  // Money in the last 30 days, from payment and refund records (not from order status):
+  // payments counted on the day they were received, refunds on the day they were given back.
+  const paid30 = one("SELECT COALESCE(SUM(total_cents), 0) s FROM orders WHERE paid_at >= datetime('now', '-30 day')").s;
+  const refunded30 = one("SELECT COALESCE(SUM(amount_cents), 0) s FROM refunds WHERE created_at >= datetime('now', '-30 day')").s;
   res.json({
     pending: one("SELECT COUNT(*) c FROM orders WHERE status = 'pending'").c,
+    needs_refund: one(`SELECT COUNT(*) c FROM orders WHERE ${NEEDS_REFUND}`).c,
+    payment_unknown: one('SELECT COUNT(*) c FROM orders WHERE payment_unknown = 1').c,
     to_ship: one("SELECT COUNT(*) c FROM orders WHERE status = 'paid'").c,
     orders_30d: one("SELECT COUNT(*) c FROM orders WHERE created_at >= datetime('now','-30 day') AND status != 'cancelled'").c,
-    revenue_30d: one("SELECT COALESCE(SUM(total_cents),0) s FROM orders WHERE created_at >= datetime('now','-30 day') AND status IN ('paid','shipped','delivered')").s,
+    paid_30d: paid30,
+    refunded_30d: refunded30,
+    revenue_30d: paid30 - refunded30,
     customers: one('SELECT COUNT(*) c FROM users').c,
     views: db.prepare(`SELECT p.id, p.name_en AS name,
         SUM(CASE WHEN v.day >= date('now','-7 day') THEN 1 ELSE 0 END) AS d7,
@@ -649,7 +732,18 @@ app.delete('/api/admin/products/:id', requireAdmin, (req, res) => {
 });
 
 // Orders
-const ORDER_COLS = '*, (SELECT COUNT(*) FROM withdrawals w WHERE w.order_id = orders.id) AS withdrawals';
+// Money given back for an order = the sum of its refund rows. A paid order that was cancelled
+// should be refunded in full: needs_refund / refund_due_cents say whether and how much is still owed.
+const REFUNDED = '(SELECT COALESCE(SUM(r.amount_cents), 0) FROM refunds r WHERE r.order_id = orders.id)';
+const NEEDS_REFUND = `(orders.status = 'cancelled' AND orders.paid_at IS NOT NULL AND ${REFUNDED} < orders.total_cents)`;
+const ORDER_COLS = `orders.*, (SELECT COUNT(*) FROM withdrawals w WHERE w.order_id = orders.id) AS withdrawals,
+  ${REFUNDED} AS refund_total_cents,
+  ${NEEDS_REFUND} AS needs_refund,
+  CASE WHEN ${NEEDS_REFUND} THEN orders.total_cents - ${REFUNDED} ELSE 0 END AS refund_due_cents,
+  (SELECT json_group_array(json_object('amount_cents', r.amount_cents, 'note', r.note, 'created_at', r.created_at))
+     FROM (SELECT * FROM refunds WHERE order_id = orders.id ORDER BY id) r) AS refunds,
+  (SELECT json_group_array(json_object('answer', c.answer, 'created_at', c.created_at))
+     FROM (SELECT * FROM payment_checks WHERE order_id = orders.id ORDER BY id) c) AS payment_checks`;
 app.get('/api/admin/orders', requireAdmin, (req, res) => {
   const st = req.query.status;
   const rows = STATUSES.includes(st)
@@ -657,19 +751,75 @@ app.get('/api/admin/orders', requireAdmin, (req, res) => {
     : db.prepare(`SELECT ${ORDER_COLS} FROM orders ORDER BY id DESC LIMIT 500`).all();
   res.json(rows);
 });
+// "Was this old cancelled order paid?" (orders flagged payment_unknown by the migration).
+// Every answer is saved with its date in payment_checks. A wrong answer can be corrected
+// (confirm_correction: true); the correction is a new row, so the history shows both.
+// - 'paid' records a payment on the order date (estimated), paid_via = 'check'
+// - correcting to 'unpaid' removes only that 'check' payment, and only if nothing was refunded
+//   (refunds are permanent); real payments (Stripe, admin, legacy) are never touched here
+function answerPaymentCheck(o, b, res) {
+  const answer = b.payment_check;
+  const fail = msg => res.status(400).json({ error: msg });
+  if (!['paid', 'unpaid'].includes(answer)) return fail('Geçersiz ödeme kontrolü');
+  const last = db.prepare('SELECT answer FROM payment_checks WHERE order_id = ? ORDER BY id DESC LIMIT 1').get(o.id);
+  if (!last && !o.payment_unknown) return fail('Bu siparişte ödeme kontrolü yok');
+  if (last && b.confirm_correction !== true) return fail('Önceki cevabı değiştirmek için onay gerekli');
+  if (last && last.answer === answer) return fail('Cevap zaten bu');
+  if (answer === 'unpaid' && o.paid_at) {
+    if (o.paid_via !== 'check') return fail('Bu ödeme kontrolden gelmiyor; buradan silinemez');
+    const refunded = db.prepare('SELECT COALESCE(SUM(amount_cents), 0) s FROM refunds WHERE order_id = ?').get(o.id).s;
+    if (refunded > 0) return fail('Bu siparişte iade kaydı var; "ödenmemişti" yapılamaz');
+  }
+  inTransaction(() => {
+    db.prepare('INSERT INTO payment_checks (order_id, answer) VALUES (?, ?)').run(o.id, answer);
+    db.prepare('UPDATE orders SET payment_unknown = 0 WHERE id = ?').run(o.id);
+    if (answer === 'paid' && !o.paid_at)        // real day unknown: use the order date, marked as estimated
+      db.prepare("UPDATE orders SET paid_at = created_at, paid_at_estimated = 1, paid_via = 'check' WHERE id = ?").run(o.id);
+    if (answer === 'unpaid' && o.paid_at)
+      db.prepare('UPDATE orders SET paid_at = NULL, paid_at_estimated = 0, paid_via = NULL WHERE id = ?').run(o.id);
+  });
+  res.json({ ok: true, mailed: false });
+}
+
 app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
   const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!o) return res.status(404).json({ error: 'Not found' });
   const b = req.body || {};
+  if (b.payment_check !== undefined) return answerPaymentCheck(o, b, res);
   const status = STATUSES.includes(b.status) ? b.status : o.status;
-  // Put stock back when an order is cancelled (and take it again if un-cancelled)
-  if (status !== o.status && (status === 'cancelled' || o.status === 'cancelled')) {
-    const sign = status === 'cancelled' ? 1 : -1;
-    const upd = db.prepare('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?');
-    for (const i of JSON.parse(o.items)) upd.run(sign * i.qty, i.id);
+
+  // Refunds are separate, dated records (POST .../refunds); saving the order never changes them
+  if (b.refunded_cents !== undefined)
+    return res.status(400).json({ error: 'İadeyi "İade ekle" ile kaydet' });
+
+  // The payment record does not follow the status. Going back to "pending" only removes a payment
+  // the admin marked by hand (a mistake), and only if nothing was refunded. A payment confirmed by
+  // Stripe or from before payment dates were stored is never erased.
+  let undoManualPayment = false;
+  if (status === 'pending' && o.paid_at) {
+    const refunded = db.prepare('SELECT COALESCE(SUM(amount_cents), 0) s FROM refunds WHERE order_id = ?').get(o.id).s;
+    if (o.paid_via !== 'admin' || refunded > 0)
+      return res.status(400).json({ error: 'Bu siparişin ödemesi kayıtlı; "Ödeme bekliyor" yapılamaz. Para geri verildiyse siparişi iptal edip iade ekle.' });
+    undoManualPayment = true;
   }
-  db.prepare('UPDATE orders SET status = ?, tracking = ? WHERE id = ?')
-    .run(status, b.tracking !== undefined ? str(b.tracking, 200) : o.tracking, o.id);
+
+  let newlyPaid = null;
+  try {
+    inTransaction(() => {
+      // Put stock back when an order is cancelled, take it again if un-cancelled (only if there is enough)
+      if (status !== o.status && status === 'cancelled') returnStock(JSON.parse(o.items));
+      if (status !== o.status && o.status === 'cancelled')
+        takeStock(JSON.parse(o.items), (p, qty) => `Stok yetersiz: ${p.name_en} (stokta ${p.stock}, gereken ${qty})`);
+      db.prepare('UPDATE orders SET status = ?, tracking = ? WHERE id = ?')
+        .run(status, b.tracking !== undefined ? str(b.tracking, 200) : o.tracking, o.id);
+      if (undoManualPayment)
+        db.prepare('UPDATE orders SET paid_at = NULL, paid_at_estimated = 0, paid_via = NULL WHERE id = ?').run(o.id);
+      if (PAID_STATUSES.includes(status)) newlyPaid = recordPayment(o.id, 'admin');
+    });
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+  if (newlyPaid) cardPaymentMails(newlyPaid, baseUrl(req));
   // Tell the customer when the order is paid, shipped or cancelled
   let mailed = false;
   if (status !== o.status && b.notify !== false && ['paid', 'shipped', 'cancelled'].includes(status)) {
@@ -679,12 +829,36 @@ app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
   res.json({ ok: true, mailed });
 });
 
+// Add a refund (money actually given back). Refunds are only added, never edited, so the dated
+// history stays complete; several partial refunds are fine up to the order total.
+app.post('/api/admin/orders/:id/refunds', requireAdmin, (req, res) => {
+  const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
+  if (!o) return res.status(404).json({ error: 'Not found' });
+  const b = req.body || {};
+  const amount = b.amount_cents;
+  if (!Number.isInteger(amount) || amount <= 0)
+    return res.status(400).json({ error: 'İade tutarı 0’dan büyük olmalı (ör. 12,50)' });
+  if (!o.paid_at) return res.status(400).json({ error: 'Ödenmemiş siparişte iade olamaz' });
+  try {
+    inTransaction(() => {
+      const done = db.prepare('SELECT COALESCE(SUM(amount_cents), 0) s FROM refunds WHERE order_id = ?').get(o.id).s;
+      if (done + amount > o.total_cents)
+        throw new Error(`İade, kalan tutarı aşamaz (en fazla ${((o.total_cents - done) / 100).toFixed(2)} €)`);
+      db.prepare('INSERT INTO refunds (order_id, amount_cents, note) VALUES (?, ?, ?)').run(o.id, amount, str(b.note, 200));
+    });
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+  res.json({ ok: true, order: db.prepare(`SELECT ${ORDER_COLS} FROM orders WHERE id = ?`).get(o.id) });
+});
+
 // Customers
 app.get('/api/admin/customers', requireAdmin, (req, res) => {
   res.json(db.prepare(`
     SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.zip, u.province, u.country, u.car, u.created_at,
       COUNT(o.id) AS orders,
-      COALESCE(SUM(CASE WHEN o.status IN ('paid','shipped','delivered') THEN o.total_cents END), 0) AS spent_cents,
+      COALESCE(SUM(CASE WHEN o.paid_at IS NOT NULL THEN o.total_cents
+        - (SELECT COALESCE(SUM(r.amount_cents), 0) FROM refunds r WHERE r.order_id = o.id) END), 0) AS spent_cents,
       MAX(o.created_at) AS last_order
     FROM users u LEFT JOIN orders o ON o.user_id = u.id
     GROUP BY u.id ORDER BY u.id DESC`).all());
@@ -693,7 +867,7 @@ app.get('/api/admin/customers/:id', requireAdmin, (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!u) return res.status(404).json({ error: 'Not found' });
   // also show guest orders made with the same email before registering
-  const orders = db.prepare('SELECT * FROM orders WHERE user_id = ? OR (user_id IS NULL AND lower(email) = ?) ORDER BY id DESC')
+  const orders = db.prepare(`SELECT ${ORDER_COLS} FROM orders WHERE user_id = ? OR (user_id IS NULL AND lower(email) = ?) ORDER BY id DESC`)
     .all(u.id, u.email);
   res.json({ user: publicUser(u), orders });
 });
