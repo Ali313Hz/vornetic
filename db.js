@@ -131,7 +131,19 @@ for (const sql of [
   "ALTER TABLE products ADD COLUMN status TEXT DEFAULT 'available'",
   // A short-lived pre-release stored a password-derived tag here; remove it if present
   'ALTER TABLE admin_sessions DROP COLUMN pw_tag',
+  // Money actually given back to the customer for this order (cents)
+  'ALTER TABLE orders ADD COLUMN refunded_cents INTEGER NOT NULL DEFAULT 0',
 ]) { try { db.exec(sql); } catch { /* already there */ } }
+
+// When an order was paid. Runs once: orders that were already paid before this column existed
+// get their order date instead, marked paid_at_estimated = 1 (the real payment day is unknown).
+if (!db.prepare("SELECT 1 FROM pragma_table_info('orders') WHERE name = 'paid_at'").get()) {
+  db.exec(`BEGIN;
+    ALTER TABLE orders ADD COLUMN paid_at TEXT;
+    ALTER TABLE orders ADD COLUMN paid_at_estimated INTEGER NOT NULL DEFAULT 0;
+    UPDATE orders SET paid_at = created_at, paid_at_estimated = 1 WHERE status IN ('paid', 'shipped', 'delivered');
+    COMMIT;`);
+}
 db.exec('CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id)');
 
 // ---------- Default settings (editable from /admin → Settings) ----------

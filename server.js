@@ -17,6 +17,8 @@ const PORT = process.env.PORT || 3300;
 const DEFAULT_ADMIN_PASSWORD = 'vornetic2026';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || '';
+// Only the automated tests change this (to a fake Stripe on 127.0.0.1); leave it unset in .env
+const STRIPE_API = (process.env.STRIPE_API_URL || 'https://api.stripe.com').replace(/\/$/, '');
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -293,6 +295,36 @@ function cleanLine(it) {
   return { id: p.id, name: p.name_en, name_es: p.name_es, qty, unit_cents: unit, options: labels, options_es: labelsEs, car };
 }
 
+// Run fn as one SQLite transaction: either all of its changes are saved or none are
+function inTransaction(fn) {
+  db.exec('BEGIN IMMEDIATE');
+  try { const r = fn(); db.exec('COMMIT'); return r; }
+  catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+// Total quantity per product id (the same product can be on several cart lines)
+function qtyByProduct(items) {
+  const need = new Map();
+  for (const i of items) need.set(i.id, (need.get(i.id) || 0) + i.qty);
+  return need;
+}
+
+// Take an order's items out of stock. Throws (taking nothing) if any product hasn't enough.
+// Products deleted since the order was placed are skipped: there is no stock left to track.
+function takeStock(items, notEnough) {
+  const take = db.prepare('UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?');
+  for (const [id, qty] of qtyByProduct(items)) {
+    if (take.run(qty, id, qty).changes) continue;
+    const p = db.prepare('SELECT name_en, stock FROM products WHERE id = ?').get(id);
+    if (p) throw new Error(notEnough(p, qty));
+  }
+}
+function returnStock(items) {
+  const put = db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?');
+  for (const [id, qty] of qtyByProduct(items)) put.run(qty, id);
+}
+const PAID_STATUSES = ['paid', 'shipped', 'delivered'];
+
 app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
   const b = req.body || {};
   const s = getSettings();
@@ -317,14 +349,16 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
     const total = subtotal + shipping;
     const ref = newRef();
 
-    const info = db.prepare(`INSERT INTO orders
-      (ref, user_id, customer_name, email, phone, address, city, zip, province, country, notes, items,
-       subtotal_cents, shipping_cents, total_cents, payment_method, lang)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(ref, user ? user.id : null, name, email, phone, address, city, zip, province, country, str(b.notes, 500),
-        JSON.stringify(items), subtotal, shipping, total, method, lang);
-    const dec = db.prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?');
-    for (const i of items) dec.run(i.qty, i.id);
+    // Save the order and take its stock together; not enough stock = no order at all
+    const info = inTransaction(() => {
+      takeStock(items, (p, qty) => `Not enough stock: ${p.name_en} (only ${p.stock} left, you asked for ${qty})`);
+      return db.prepare(`INSERT INTO orders
+        (ref, user_id, customer_name, email, phone, address, city, zip, province, country, notes, items,
+         subtotal_cents, shipping_cents, total_cents, payment_method, lang)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(ref, user ? user.id : null, name, email, phone, address, city, zip, province, country, str(b.notes, 500),
+          JSON.stringify(items), subtotal, shipping, total, method, lang);
+    });
 
     // Remember the address on the customer's account if they have none yet
     if (user && !user.address) {
@@ -333,7 +367,18 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
     }
 
     if (method === 'card') {
-      const session = await stripeCheckout({ ref, email, lang, items, shipping, base: baseUrl(req) });
+      let session;
+      try {
+        session = await stripeCheckout({ ref, email, lang, items, shipping, base: baseUrl(req) });
+      } catch (err) {
+        // No payment page = no sale: cancel the order and give its stock back
+        console.error(`Stripe checkout failed for ${ref}:`, err.message);
+        inTransaction(() => {
+          const r = db.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ? AND status = 'pending'").run(info.lastInsertRowid);
+          if (r.changes) returnStock(items);
+        });
+        throw new Error('Card payment is not available right now. Please try again or choose another payment method.');
+      }
       db.prepare('UPDATE orders SET stripe_session = ? WHERE id = ?').run(session.id, info.lastInsertRowid);
       return res.json({ ok: true, ref, redirect: session.url });   // e-mails are sent once the card payment is confirmed
     }
@@ -364,17 +409,26 @@ app.post('/api/orders/confirm', limit(30, 10 * 60 * 1000), async (req, res) => {
   const o = db.prepare('SELECT * FROM orders WHERE ref = ? AND stripe_session = ?').get(str(ref, 20), str(session_id, 200));
   if (!o) return res.status(404).json({ error: 'Order not found' });
   try {
-    if (o.status === 'pending') {
+    let status = o.status;
+    if (!o.paid_at) {
       const sess = await stripe('GET', `/v1/checkout/sessions/${encodeURIComponent(o.stripe_session)}`);
       if (sess.payment_status === 'paid') {
-        db.prepare("UPDATE orders SET status = 'paid' WHERE id = ?").run(o.id);
-        o.status = 'paid';
-        const s = getSettings();
-        mail.orderConfirmation(o, s, baseUrl(req));
-        mail.shopNewOrder(o, s, baseUrl(req));
+        // "AND paid_at IS NULL" lets only one request record the payment, so e-mails go out once
+        // even if the success page is opened twice at the same time. If the order was cancelled
+        // meanwhile it stays cancelled, but the payment is recorded so the admin sees a refund is due.
+        const r = db.prepare(`UPDATE orders SET paid_at = datetime('now'),
+            status = CASE status WHEN 'pending' THEN 'paid' ELSE status END
+          WHERE id = ? AND paid_at IS NULL`).run(o.id);
+        const now = db.prepare('SELECT * FROM orders WHERE id = ?').get(o.id);
+        status = now.status;
+        if (r.changes && status === 'paid') {
+          const s = getSettings();
+          mail.orderConfirmation(now, s, baseUrl(req));
+          mail.shopNewOrder(now, s, baseUrl(req));
+        }
       }
     }
-    res.json({ ok: true, ref: o.ref, status: o.status, total_cents: o.total_cents, payment_method: 'card' });
+    res.json({ ok: true, ref: o.ref, status, total_cents: o.total_cents, payment_method: 'card' });
   } catch (e) {
     res.status(502).json({ error: 'Could not verify payment' });
   }
@@ -398,7 +452,7 @@ app.post('/api/withdraw', limit(10, 30 * 60 * 1000), (req, res) => {
 
 // ---------- Stripe (REST, no SDK) ----------
 async function stripe(method, url, params) {
-  const r = await fetch('https://api.stripe.com' + url, {
+  const r = await fetch(STRIPE_API + url, {
     method,
     headers: { Authorization: `Bearer ${STRIPE_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params ? new URLSearchParams(params).toString() : undefined,
@@ -504,6 +558,7 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
   const one = sql => db.prepare(sql).get();
   res.json({
     pending: one("SELECT COUNT(*) c FROM orders WHERE status = 'pending'").c,
+    needs_refund: one(`SELECT COUNT(*) c FROM orders WHERE ${NEEDS_REFUND}`).c,
     to_ship: one("SELECT COUNT(*) c FROM orders WHERE status = 'paid'").c,
     orders_30d: one("SELECT COUNT(*) c FROM orders WHERE created_at >= datetime('now','-30 day') AND status != 'cancelled'").c,
     revenue_30d: one("SELECT COALESCE(SUM(total_cents),0) s FROM orders WHERE created_at >= datetime('now','-30 day') AND status IN ('paid','shipped','delivered')").s,
@@ -649,7 +704,10 @@ app.delete('/api/admin/products/:id', requireAdmin, (req, res) => {
 });
 
 // Orders
-const ORDER_COLS = '*, (SELECT COUNT(*) FROM withdrawals w WHERE w.order_id = orders.id) AS withdrawals';
+// needs_refund: the customer paid, the order was cancelled, and less than the total is recorded as refunded
+const NEEDS_REFUND = "(status = 'cancelled' AND paid_at IS NOT NULL AND refunded_cents < total_cents)";
+const ORDER_COLS = `*, (SELECT COUNT(*) FROM withdrawals w WHERE w.order_id = orders.id) AS withdrawals,
+  ${NEEDS_REFUND} AS needs_refund`;
 app.get('/api/admin/orders', requireAdmin, (req, res) => {
   const st = req.query.status;
   const rows = STATUSES.includes(st)
@@ -662,14 +720,39 @@ app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
   if (!o) return res.status(404).json({ error: 'Not found' });
   const b = req.body || {};
   const status = STATUSES.includes(b.status) ? b.status : o.status;
-  // Put stock back when an order is cancelled (and take it again if un-cancelled)
-  if (status !== o.status && (status === 'cancelled' || o.status === 'cancelled')) {
-    const sign = status === 'cancelled' ? 1 : -1;
-    const upd = db.prepare('UPDATE products SET stock = MAX(0, stock + ?) WHERE id = ?');
-    for (const i of JSON.parse(o.items)) upd.run(sign * i.qty, i.id);
+
+  // Refunded amount (cents) — what was actually given back to the customer
+  let refunded = o.refunded_cents;
+  if (b.refunded_cents !== undefined) {
+    refunded = Number(b.refunded_cents);
+    if (!Number.isInteger(refunded) || refunded < 0 || refunded > o.total_cents)
+      return res.status(400).json({ error: 'İade tutarı 0 ile sipariş toplamı arasında olmalı' });
   }
-  db.prepare('UPDATE orders SET status = ?, tracking = ? WHERE id = ?')
-    .run(status, b.tracking !== undefined ? str(b.tracking, 200) : o.tracking, o.id);
+
+  // Payment date: set the first time the order counts as paid, cleared if it goes back to "pending".
+  // A cancelled order keeps it, so a paid-then-cancelled order still shows that money came in.
+  let paidAt = o.paid_at;
+  if (status === 'pending') paidAt = null;
+  else if (PAID_STATUSES.includes(status) && !paidAt) paidAt = 'now';
+  if (!paidAt && refunded > 0)
+    return res.status(400).json({ error: 'Ödenmemiş siparişte iade olamaz' });
+
+  try {
+    inTransaction(() => {
+      // Put stock back when an order is cancelled, take it again if un-cancelled (only if there is enough)
+      if (status !== o.status && status === 'cancelled') returnStock(JSON.parse(o.items));
+      if (status !== o.status && o.status === 'cancelled')
+        takeStock(JSON.parse(o.items), (p, qty) => `Stok yetersiz: ${p.name_en} (stokta ${p.stock}, gereken ${qty})`);
+      db.prepare(`UPDATE orders SET status = ?, tracking = ?, refunded_cents = ?,
+          paid_at = CASE WHEN ? = 'now' THEN datetime('now') ELSE ? END,
+          paid_at_estimated = CASE WHEN ? IS NULL OR ? = 'now' THEN 0 ELSE paid_at_estimated END
+        WHERE id = ?`)
+        .run(status, b.tracking !== undefined ? str(b.tracking, 200) : o.tracking, refunded,
+          paidAt, paidAt, paidAt, paidAt, o.id);
+    });
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
   // Tell the customer when the order is paid, shipped or cancelled
   let mailed = false;
   if (status !== o.status && b.notify !== false && ['paid', 'shipped', 'cancelled'].includes(status)) {
@@ -693,7 +776,7 @@ app.get('/api/admin/customers/:id', requireAdmin, (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!u) return res.status(404).json({ error: 'Not found' });
   // also show guest orders made with the same email before registering
-  const orders = db.prepare('SELECT * FROM orders WHERE user_id = ? OR (user_id IS NULL AND lower(email) = ?) ORDER BY id DESC')
+  const orders = db.prepare(`SELECT ${ORDER_COLS} FROM orders WHERE user_id = ? OR (user_id IS NULL AND lower(email) = ?) ORDER BY id DESC`)
     .all(u.id, u.email);
   res.json({ user: publicUser(u), orders });
 });

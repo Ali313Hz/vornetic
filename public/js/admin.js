@@ -92,7 +92,10 @@ function bindOrderCards(scope, after = show) {
   $$('.order', scope).forEach(el => {
     $('.save', el).addEventListener('click', async () => {
       try {
-        const r = await send('/api/admin/orders/' + el.dataset.id, { status: $('.sts', el).value, tracking: $('.trk', el).value });
+        const body = { status: $('.sts', el).value, tracking: $('.trk', el).value };
+        const rfd = $('.rfd', el);
+        if (rfd) body.refunded_cents = Math.round((Number(rfd.value.replace(',', '.')) || 0) * 100);
+        const r = await send('/api/admin/orders/' + el.dataset.id, body);
         toast(r.mailed ? 'Kaydedildi · müşteriye e-posta gitti' : 'Kaydedildi'); after();
       } catch (e) { toast(e.message); }
     });
@@ -110,12 +113,14 @@ function orderHtml(o) {
     <div class="order-head">
       <div><b>${esc(o.ref)}</b> · <span class="muted">${esc(day(o.created_at))}</span> · <span class="muted">${esc(o.lang.toUpperCase())}</span>
         ${o.user_id ? ` · <button class="chip-btn small" data-cust="${o.user_id}">kayıtlı müşteri →</button>` : ' · <span class="muted small">misafir</span>'}</div>
-      <div>${o.withdrawals ? '<span class="status pending">↩ Cayma talebi</span> ' : ''}<span class="status ${esc(o.status)}">${STATUS[o.status]}</span></div>
+      <div>${o.needs_refund ? '<span class="status cancelled">⚠ Ödendi ama iptal — iade kaydı yok</span> ' : ''}${o.withdrawals ? '<span class="status pending">↩ Cayma talebi</span> ' : ''}<span class="status ${esc(o.status)}">${STATUS[o.status]}</span></div>
     </div>
     <div class="order-cols">
       <div class="items">${items.map(i => `<div><b>${i.qty}× ${esc(i.name)}</b> — ${eur(i.unit_cents * i.qty)}
         ${i.car ? `<small>🚗 ${esc(i.car)}</small>` : ''}${(i.options || []).map(x => `<small>${esc(x)}</small>`).join('')}</div>`).join('')}
-        <div style="border:0">Kargo: ${eur(o.shipping_cents)} · <b>Toplam: ${eur(o.total_cents)}</b> · ${PAY[o.payment_method] || esc(o.payment_method)}</div>
+        <div style="border:0">Kargo: ${eur(o.shipping_cents)} · <b>Toplam: ${eur(o.total_cents)}</b> · ${PAY[o.payment_method] || esc(o.payment_method)}
+          ${o.paid_at ? ` · Ödeme: ${esc(day(o.paid_at))}${o.paid_at_estimated ? ' (tahmini)' : ''}` : ''}
+          ${o.refunded_cents ? ` · <b>İade: ${eur(o.refunded_cents)}</b>` : ''}</div>
       </div>
       <div>
         <b>${esc(o.customer_name)}</b><br>
@@ -128,6 +133,8 @@ function orderHtml(o) {
     <div class="order-actions">
       <select class="in sts">${Object.entries(STATUS).map(([k, v]) => `<option value="${k}"${k === o.status ? ' selected' : ''}>${v}</option>`).join('')}</select>
       <input class="in trk" placeholder="Kargo takip no (Kargoda yapmadan önce yaz)" value="${esc(o.tracking)}" style="min-width:260px">
+      ${o.paid_at ? `<label class="small">İade edilen €
+        <input class="in rfd" inputmode="decimal" value="${(o.refunded_cents / 100).toFixed(2)}" style="width:100px"></label>` : ''}
       <button class="btn sm save">Kaydet</button>
     </div>
   </div>`;
@@ -649,6 +656,7 @@ async function viewStats() {
     <div class="stats">
       <div><b>${s.pending}</b><span>Ödeme bekleyen</span></div>
       <div><b>${s.to_ship}</b><span>Gönderilecek</span></div>
+      ${s.needs_refund ? `<div><b>${s.needs_refund}</b><span>⚠ İade kaydı eksik</span></div>` : ''}
       <div><b>${s.orders_30d}</b><span>Sipariş (30 gün)</span></div>
       <div><b>${eur(s.revenue_30d)}</b><span>Ödenen ciro (30 gün)</span></div>
       <div><b>${s.customers}</b><span>Kayıtlı müşteri</span></div>
