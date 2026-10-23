@@ -37,6 +37,8 @@ async function shop({ stripeOn = true, dataDir, env = {} } = {}) {
     get: ref => one('SELECT * FROM orders WHERE ref = ?', ref),
     // the queued e-mail of this kind for the order (mail_outbox row), or undefined
     mail: (ref, kind) => one('SELECT m.* FROM mail_outbox m JOIN orders o ON o.id = m.order_id WHERE o.ref = ? AND m.kind = ?', ref, kind),
+    // move every scheduled retry into the past (like age() for orders): the next run may retry them
+    retryTimeHasCome: () => sql("UPDATE mail_outbox SET next_try_at = datetime('now', '-1 second') WHERE state = 'due' AND next_try_at IS NOT NULL"),
     // admin view of the order (with needs_refund, refund_due_cents, mails…)
     view: ref => srv.orderByRef(ref),
     age: (ref, sqliteOffset) => sql(`UPDATE orders SET created_at = datetime('now', ?) WHERE ref = ?`, sqliteOffset, ref),
@@ -173,6 +175,7 @@ test('a failed cancellation e-mail is kept and sent on a later run; un-cancel st
     assert.strictEqual((await setOrderSoon(s, b, { status: 'pending' })).status, 200);   // owner reinstates b: its e-mail must not go
     assert.strictEqual(s.mail(b, 'expired').state, 'dropped');
     s.smtp.ctl.reject = null;                                           // mail server is back
+    s.retryTimeHasCome();                                               // (the retry time has come: as if 15+ minutes later)
     await s.expire();                                                   // the 15-minute run retries
     assert.ok(await until(() => s.mail(a, 'expired').state === 'sent'));
     await sleep(300);
@@ -183,6 +186,7 @@ test('a failed cancellation e-mail is kept and sent on a later run; un-cancel st
     assert.strictEqual((await s.cancelUnpaid(c)).status, 200);
     assert.ok(await until(() => s.mail(c, 'expired').tries >= 1));
     s.sql('UPDATE mail_outbox SET tries = 9 WHERE id = ?', s.mail(c, 'expired').id);   // as if it failed 9 times already
+    s.retryTimeHasCome();                                               // (the retry time has come: as if 15+ minutes later)
     await s.expire();
     assert.ok(await until(() => s.mail(c, 'expired').state === 'failed'), 'gives up');
     assert.match(JSON.stringify((await s.view(c)).mails), /failed/, 'the admin sees it on the order');
@@ -335,6 +339,7 @@ test('card: payment found by the check while the mail server fails → payment k
     assert.strictEqual(s.smtp.messages.length, before);
 
     s.smtp.ctl.reject = null;                                           // mail server back
+    s.retryTimeHasCome();                                               // (the retry time has come: as if 15+ minutes later)
     await s.expire();
     assert.ok(await until(() => [found, back].every(ref => s.mail(ref, 'confirmation').state === 'sent' && s.mail(ref, 'shop_new_order').state === 'sent')));
     await sleep(300);
@@ -768,6 +773,7 @@ test('outbox: a cancellation e-mail that failed is sent for a new cancellation a
     assert.strictEqual((await s.cancelUnpaid(ref)).status, 200);
     assert.ok(await until(() => s.mail(ref, 'expired').tries >= 1 && s.mail(ref, 'expired').state === 'due'));
     s.sql('UPDATE mail_outbox SET tries = 9 WHERE id = ?', s.mail(ref, 'expired').id);
+    s.retryTimeHasCome();                                               // (the retry time has come: as if 15+ minutes later)
     await s.expire();
     assert.ok(await until(() => s.mail(ref, 'expired').state === 'failed'), 'gave up');
 
@@ -1016,4 +1022,114 @@ test('outbox: an e-mail that just failed is not retried at once when more mail i
     assert.deepStrictEqual([a, b].flatMap(ref => ['confirmation', 'shop_new_order'].map(k => s.mail(ref, k).tries)), [1, 1, 1, 1],
       'each tried once in this run: a failed one waits for the next run');
   } finally { await s.close(); }
+});
+
+// ---------- One Stripe close attempt at a time, released only by its owner (Codex P2) ----------
+test('Stripe close: an overlapping attempt (cancel + check) sends one close request; reinstating waits for it', async () => {
+  const s = await shop();
+  try {
+    const ref = await s.order('card', 2);
+    s.sessionOf(ref).expireDelayMs = 800;                               // Stripe is slow to close the page
+    assert.strictEqual((await s.srv.setOrder(ref, { status: 'cancelled' })).status, 200);   // close attempt #1
+    assert.ok(await until(() => s.stripe.state.expires === 1), 'closing in progress');
+    await s.expire();                                                   // the check sees the page still open: attempt #2 must not start
+    assert.strictEqual((await s.srv.setOrder(ref, { status: 'pending' })).status, 409, 'reinstating waits');
+    assert.ok(await until(() => s.sessionOf(ref).status === 'expired' && !s.get(ref).stripe_expiring_at), 'closed, claim released');
+    await sleep(300);
+    assert.strictEqual(s.stripe.state.expires, 1, 'one close request, not two');
+    assert.deepStrictEqual([s.get(ref).status, s.stock()], ['cancelled', 10], 'stock returned once');
+  } finally { await s.close(); }
+});
+
+test('Stripe close: a live claim of another attempt is left alone; a dead (stale) one is taken over and released by the new owner', async () => {
+  const s = await shop();
+  try {
+    const ref = await s.order('card', 2);
+    s.sessionOf(ref).expireFail = true;                                 // the close at cancel time fails: the page stays open
+    assert.strictEqual((await s.srv.setOrder(ref, { status: 'cancelled' })).status, 200);
+    assert.ok(await until(() => s.stripe.state.expires === 1 && !s.get(ref).stripe_expiring_at));
+    s.sessionOf(ref).expireFail = false;
+
+    // another attempt holds a live claim (it is still talking to Stripe)
+    s.sql("UPDATE orders SET stripe_expiring_at = datetime('now') WHERE ref = ?", ref);
+    await s.expire();
+    await sleep(300);
+    assert.strictEqual(s.stripe.state.expires, 1, 'no second close request while that one is live');
+    assert.ok(s.get(ref).stripe_expiring_at, 'its claim is not released');
+    assert.strictEqual((await s.srv.setOrder(ref, { status: 'pending' })).status, 409, 'reinstating waits for it');
+    s.sql("UPDATE orders SET stripe_expiring_token = 'other-attempt' WHERE ref = ?", ref);   // (that attempt's token)
+
+    // that attempt died (claim older than a minute): the next check takes over, closes the page and releases its own claim
+    s.sql("UPDATE orders SET stripe_expiring_at = datetime('now', '-2 minutes') WHERE ref = ?", ref);
+    s.sessionOf(ref).expireDelayMs = 600;
+    await s.expire();
+    assert.ok(await until(() => s.stripe.state.expires === 2), 'taken over');
+    const mine = s.get(ref).stripe_expiring_token;
+    assert.ok(mine && mine !== 'other-attempt', 'claimed with a new token');
+    assert.strictEqual((await s.srv.setOrder(ref, { status: 'pending' })).status, 409, 'reinstating waits for the new attempt');
+    // the dead attempt's late release (its token) must not free the new claim
+    s.sql("UPDATE orders SET stripe_expiring_at = NULL, stripe_expiring_token = NULL WHERE ref = ? AND stripe_expiring_token = 'other-attempt'", ref);
+    assert.strictEqual(s.get(ref).stripe_expiring_token, mine);
+    assert.ok(await until(() => s.sessionOf(ref).status === 'expired' && !s.get(ref).stripe_expiring_token), 'closed, released by its owner');
+    assert.deepStrictEqual([s.get(ref).status, s.stock()], ['cancelled', 10]);
+  } finally { await s.close(); }
+});
+
+// ---------- Mail retries back off; new mail goes out at once (Codex P2) ----------
+test('outbox: during an SMTP outage a failed e-mail waits for its retry time, whatever else triggers sending; new mail goes out at once', async () => {
+  const s = await shop();
+  try {
+    const a = await s.order('card'), b = await s.order('card');
+    const pay = async ref => {
+      Object.assign(s.sessionOf(ref), { status: 'complete', payment_status: 'paid' });
+      assert.strictEqual((await s.srv.call('POST', '/api/orders/confirm', { ref, session_id: s.get(ref).stripe_session })).body.paid, true);
+    };
+    const mins = ref => (Date.parse(s.mail(ref, 'confirmation').next_try_at.replace(' ', 'T') + 'Z') - Date.now()) / 60000;
+    await settled(s);
+    s.smtp.ctl.reject = /./;                                            // the mail server is down
+    await pay(a);
+    assert.ok(await until(() => s.mail(a, 'confirmation')?.tries === 1 && s.mail(a, 'confirmation').state === 'due'));
+
+    for (let i = 0; i < 4; i++) await s.expire();                       // unrelated runs and events…
+    await pay(b);                                                       // …including new mail, which is tried at once
+    assert.ok(await until(() => s.mail(b, 'confirmation')?.tries === 1 && s.mail(b, 'confirmation').state === 'due'), "b's new mail was tried immediately");
+    await sleep(300);
+    assert.strictEqual(s.mail(a, 'confirmation').tries, 1, "a's failed mail was not retried before its time");
+    assert.ok(mins(a) > 14 && mins(a) <= 15, `its next try is in ~15 min (${mins(a).toFixed(1)})`);
+
+    s.retryTimeHasCome();                                               // 15 minutes later
+    await s.expire();
+    assert.ok(await until(() => s.mail(a, 'confirmation').tries === 2 && s.mail(a, 'confirmation').state === 'due'));
+    assert.ok(mins(a) > 29 && mins(a) <= 30, `then ~30 min (${mins(a).toFixed(1)})`);
+    s.smtp.ctl.reject = null;                                           // back up
+    s.retryTimeHasCome();
+    await s.expire();
+    assert.ok(await until(() => [a, b].every(ref => s.mail(ref, 'confirmation').state === 'sent')), 'sent once the server is back');
+  } finally { await s.close(); }
+});
+
+test('outbox restart: an interrupted send is retried at once; a scheduled retry keeps its time across the restart', async () => {
+  const dir = tempDir();
+  try {
+    let s = await shop({ dataDir: dir });
+    const a = await s.order('card'), b = await s.order('card');
+    for (const ref of [a, b]) Object.assign(s.sessionOf(ref), { status: 'complete', payment_status: 'paid' });
+    await settled(s);
+    s.smtp.ctl.reject = /./;
+    for (const ref of [a, b]) await s.srv.call('POST', '/api/orders/confirm', { ref, session_id: s.get(ref).stripe_session });
+    assert.ok(await until(() => [a, b].every(ref => ['confirmation', 'shop_new_order'].every(k => s.mail(ref, k)?.tries === 1 && s.mail(ref, k).state === 'due'))));
+    await s.close();
+    const d = new DatabaseSync(path.join(dir, 'store.db'));
+    // a's e-mails were being sent when the server stopped (their retry time had come); b's wait for theirs
+    d.prepare("UPDATE mail_outbox SET state = 'sending', claimed_at = datetime('now') WHERE order_id = (SELECT id FROM orders WHERE ref = ?)").run(a);
+    d.close();
+    s = await shop({ dataDir: dir });
+    try {
+      assert.ok(await until(() => ['confirmation', 'shop_new_order'].every(k => s.mail(a, k).state === 'sent')), 'interrupted: sent after the restart');
+      await s.expire();
+      await sleep(400);
+      assert.deepStrictEqual(['confirmation', 'shop_new_order'].map(k => [s.mail(b, k).state, s.mail(b, k).tries]), [['due', 1], ['due', 1]],
+        'scheduled: still waiting for its retry time');
+    } finally { await s.close(); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

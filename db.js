@@ -155,6 +155,7 @@ for (const sql of [
   // Set while the shop is asking Stripe to close the payment page of a cancelled card order: the
   // order can't be reinstated until that request is over (see expireCancelledSession)
   'ALTER TABLE orders ADD COLUMN stripe_expiring_at TEXT',
+  'ALTER TABLE orders ADD COLUMN stripe_expiring_token TEXT',   // which close attempt holds that claim
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 
 // Payment date. Runs once, when the column is added. Orders already paid/shipped/delivered get
@@ -193,6 +194,7 @@ CREATE TABLE IF NOT EXISTS mail_outbox (
   tries INTEGER NOT NULL DEFAULT 0,
   claimed_at TEXT,
   sent_at TEXT,
+  next_try_at TEXT,          -- earliest time a failed e-mail may be tried again (NULL = now: new ones go out at once)
   created_at TEXT DEFAULT (datetime('now')),
   UNIQUE (order_id, kind)
 );
@@ -232,6 +234,8 @@ CREATE INDEX IF NOT EXISTS idx_orders_paid_at ON orders(paid_at);
 CREATE INDEX IF NOT EXISTS idx_refunds_created ON refunds(created_at);
 `);
 db.exec('CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id)');
+// mail_outbox tables made before next_try_at existed (the table is created above, after the order migrations)
+try { db.exec('ALTER TABLE mail_outbox ADD COLUMN next_try_at TEXT'); } catch { /* already there */ }
 
 // ---------- Default settings (editable from /admin → Settings) ----------
 const DEFAULT_SETTINGS = {

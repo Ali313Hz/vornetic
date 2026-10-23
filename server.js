@@ -431,6 +431,9 @@ const MAIL_KINDS = {
   expired: { send: (o, s) => mail.orderExpired(o, s), still: "o.status = 'cancelled' AND o.paid_at IS NULL" },
 };
 const MAIL_TRIES = 10;
+// After a failed attempt the next one waits 15 min, then 30, 60… (at most 12 h): an outage can't use
+// up the tries in minutes, whatever else triggers sending. New e-mails don't wait.
+const mailRetryMinutes = tries => Math.min(15 * 2 ** (tries - 1), 720);
 const MAIL_IN_FLIGHT = '-3 minutes';    // a send claimed longer ago than this has died (mail.js times out well before)
 
 // Queue an e-mail for an order (inside the caller's transaction). With e-mail switched off nothing
@@ -440,7 +443,8 @@ const MAIL_IN_FLIGHT = '-3 minutes';    // a send claimed longer ago than this h
 function queueMail(orderId, kind) {
   if (!mail.enabled) return false;
   db.prepare(`INSERT INTO mail_outbox (order_id, kind) VALUES (?, ?)
-    ON CONFLICT (order_id, kind) DO UPDATE SET state = 'due', tries = 0, claimed_at = NULL WHERE state IN ('dropped', 'failed')`).run(orderId, kind);
+    ON CONFLICT (order_id, kind) DO UPDATE SET state = 'due', tries = 0, claimed_at = NULL, next_try_at = NULL
+      WHERE state IN ('dropped', 'failed')`).run(orderId, kind);
   return true;
 }
 
@@ -474,17 +478,20 @@ function flushMails() {
 }
 async function sendQueuedMails(tried) {
   if (!mail.enabled) return;
-  // a send that never finished (the server stopped mid-send): try again — rarely, a duplicate
-  db.prepare("UPDATE mail_outbox SET state = 'due', claimed_at = NULL WHERE state = 'sending' AND claimed_at <= datetime('now', ?)").run(MAIL_IN_FLIGHT);
+  // a send that never finished (the server stopped mid-send): it didn't count as a try, so try again
+  // now — rarely, a duplicate
+  db.prepare("UPDATE mail_outbox SET state = 'due', claimed_at = NULL, next_try_at = NULL WHERE state = 'sending' AND claimed_at <= datetime('now', ?)").run(MAIL_IN_FLIGHT);
   const s = getSettings(), base = PUBLIC_URL || `http://localhost:${PORT}`;
-  // least-tried first: new e-mails are never stuck behind ones that keep failing
-  for (const m of db.prepare("SELECT id, kind FROM mail_outbox WHERE state = 'due' ORDER BY tries, id LIMIT 50").all()) {
+  // only those whose retry time has come; least-tried first: new e-mails are never stuck behind ones that keep failing
+  for (const m of db.prepare(`SELECT id, kind FROM mail_outbox WHERE state = 'due' AND (next_try_at IS NULL OR next_try_at <= datetime('now'))
+      ORDER BY tries, id LIMIT 50`).all()) {
     if (tried.has(m.id)) continue;
     tried.add(m.id);
     const k = MAIL_KINDS[m.kind];
     if (!k) { db.prepare("UPDATE mail_outbox SET state = 'failed' WHERE id = ?").run(m.id); continue; }
     const still = `EXISTS (SELECT 1 FROM orders o WHERE o.id = mail_outbox.order_id AND ${k.still || '1'})`;
-    if (!db.prepare(`UPDATE mail_outbox SET state = 'sending', claimed_at = datetime('now') WHERE id = ? AND state = 'due' AND ${still}`).run(m.id).changes) {
+    if (!db.prepare(`UPDATE mail_outbox SET state = 'sending', claimed_at = datetime('now') WHERE id = ? AND state = 'due'
+        AND (next_try_at IS NULL OR next_try_at <= datetime('now')) AND ${still}`).run(m.id).changes) {
       db.prepare(`UPDATE mail_outbox SET state = 'dropped' WHERE id = ? AND state = 'due' AND NOT ${still}`).run(m.id);
       continue;
     }
@@ -493,8 +500,12 @@ async function sendQueuedMails(tried) {
     let ok = false;
     try { ok = await k.send(o, s, base); } catch { ok = false; }
     if (ok) db.prepare("UPDATE mail_outbox SET state = 'sent', sent_at = datetime('now') WHERE id = ? AND state = 'sending'").run(m.id);
-    else db.prepare(`UPDATE mail_outbox SET tries = tries + 1, claimed_at = NULL,
-        state = CASE WHEN tries + 1 >= ? THEN 'failed' ELSE 'due' END WHERE id = ? AND state = 'sending'`).run(MAIL_TRIES, m.id);
+    else {
+      const tries = db.prepare('SELECT tries FROM mail_outbox WHERE id = ?').get(m.id).tries + 1;
+      db.prepare(`UPDATE mail_outbox SET tries = ?, claimed_at = NULL, next_try_at = datetime('now', ?),
+          state = CASE WHEN ? >= ? THEN 'failed' ELSE 'due' END WHERE id = ? AND state = 'sending'`)
+        .run(tries, `+${mailRetryMinutes(tries)} minutes`, tries, MAIL_TRIES, m.id);
+    }
   }
 }
 
@@ -726,17 +737,21 @@ async function stripe(method, url, params) {
 }
 // Close the Stripe payment page of a cancelled card order (best effort). Stripe refuses if the
 // customer has just paid; the Stripe check then records it. The order's CURRENT state decides, not
-// an earlier snapshot: one statement claims it (stripe_expiring_at) only if it is still cancelled and
-// unpaid, and reinstating it answers 409 while the claim is on (see PUT /api/admin/orders/:id).
-// No transaction is open during the Stripe call; the claim is released when it ends, whatever the
-// result (a claim older than STRIPE_EXPIRE_CLAIM — a stopped server — no longer blocks).
+// an earlier snapshot: one statement claims it only if it is still cancelled and unpaid AND no other
+// close attempt holds a live claim (one attempt at a time); reinstating answers 409 while a claim is
+// live (see PUT /api/admin/orders/:id). The claim carries this attempt's token and only this attempt
+// can release it. No transaction is open during the Stripe call. A claim older than
+// STRIPE_EXPIRE_CLAIM is dead (its Stripe call timed out long ago, or the server stopped) and can
+// be taken over; its late release then changes nothing (wrong token).
 const STRIPE_EXPIRE_CLAIM = '-1 minutes';   // the Stripe call times out after 15 s
 async function expireCancelledSession(orderId) {
   if (!STRIPE_KEY) return false;
-  const o = db.prepare(`UPDATE orders SET stripe_expiring_at = datetime('now')
+  const token = crypto.randomUUID();
+  const o = db.prepare(`UPDATE orders SET stripe_expiring_at = datetime('now'), stripe_expiring_token = ?
     WHERE id = ? AND status = 'cancelled' AND paid_at IS NULL AND payment_method = 'card' AND stripe_session IS NOT NULL
-    RETURNING stripe_session`).get(orderId);
-  if (!o) return false;
+      AND (stripe_expiring_at IS NULL OR stripe_expiring_at <= datetime('now', ?))
+    RETURNING stripe_session`).get(token, orderId, STRIPE_EXPIRE_CLAIM);
+  if (!o) return false;               // not cancelled any more, or another attempt is closing it right now
   try {
     await stripe('POST', `/v1/checkout/sessions/${encodeURIComponent(o.stripe_session)}/expire`);
     return true;
@@ -744,7 +759,7 @@ async function expireCancelledSession(orderId) {
     console.error('Could not close the Stripe payment page:', e.message);
     return false;
   } finally {
-    db.prepare('UPDATE orders SET stripe_expiring_at = NULL WHERE id = ?').run(orderId);
+    db.prepare('UPDATE orders SET stripe_expiring_at = NULL, stripe_expiring_token = NULL WHERE id = ? AND stripe_expiring_token = ?').run(orderId, token);
   }
 }
 // A Checkout Session, with its payment and charge, so we know when the money was actually taken
@@ -1366,7 +1381,7 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`Vornetic → http://localhost:${PORT}   Admin → http://localhost:${PORT}/admin`);
   // Nothing can be mid-send in a server that just started: e-mails left 'sending' by a stopped one
   // are sent again (rarely a duplicate, never lost)
-  db.prepare("UPDATE mail_outbox SET state = 'due', claimed_at = NULL WHERE state = 'sending'").run();
+  db.prepare("UPDATE mail_outbox SET state = 'due', claimed_at = NULL, next_try_at = NULL WHERE state = 'sending'").run();
   // Release unpaid orders now and every 15 minutes (see expireUnpaidOrders); it also sends queued e-mails
   const expire = () => expireUnpaidOrders().catch(e => console.error('Unpaid order check failed:', e.message));
   expire();
