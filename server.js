@@ -12,6 +12,7 @@ const {
 const mail = require('./mail');
 const catalog = require('./catalog');
 const stripeConfig = require('./stripe');
+const finance = require('./finance');
 
 const app = express();
 const PORT = process.env.PORT || 3300;
@@ -896,6 +897,9 @@ app.put('/api/admin/settings', requireAdmin, (req, res) => {
 });
 
 // ---------- Errors & pages ----------
+// Finance tab (income / expenses); every route there requires an admin session
+finance.register(app, { db, requireAdmin });
+
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, req, res, next) => {
   console.error(err.message);
