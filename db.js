@@ -131,19 +131,37 @@ for (const sql of [
   "ALTER TABLE products ADD COLUMN status TEXT DEFAULT 'available'",
   // A short-lived pre-release stored a password-derived tag here; remove it if present
   'ALTER TABLE admin_sessions DROP COLUMN pw_tag',
-  // Money actually given back to the customer for this order (cents)
-  'ALTER TABLE orders ADD COLUMN refunded_cents INTEGER NOT NULL DEFAULT 0',
+  // How the payment was recorded: 'stripe' (card, confirmed with Stripe), 'admin' (marked paid
+  // in the panel) or 'legacy' (order paid before payment dates were stored)
+  'ALTER TABLE orders ADD COLUMN paid_via TEXT',
+  // 1 = cancelled before payment dates were stored: nobody knows if it was paid; the admin checks
+  'ALTER TABLE orders ADD COLUMN payment_unknown INTEGER NOT NULL DEFAULT 0',
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 
-// When an order was paid. Runs once: orders that were already paid before this column existed
-// get their order date instead, marked paid_at_estimated = 1 (the real payment day is unknown).
+// Payment date. Runs once, when the column is added. Orders already paid/shipped/delivered get
+// their order date (paid_at_estimated = 1, the real day is unknown). Cancelled ones may or may not
+// have been paid, so they are flagged payment_unknown for the admin to check.
 if (!db.prepare("SELECT 1 FROM pragma_table_info('orders') WHERE name = 'paid_at'").get()) {
   db.exec(`BEGIN;
     ALTER TABLE orders ADD COLUMN paid_at TEXT;
     ALTER TABLE orders ADD COLUMN paid_at_estimated INTEGER NOT NULL DEFAULT 0;
-    UPDATE orders SET paid_at = created_at, paid_at_estimated = 1 WHERE status IN ('paid', 'shipped', 'delivered');
+    UPDATE orders SET paid_at = created_at, paid_at_estimated = 1, paid_via = 'legacy' WHERE status IN ('paid', 'shipped', 'delivered');
+    UPDATE orders SET payment_unknown = 1 WHERE status = 'cancelled';
     COMMIT;`);
 }
+
+// Refunds: one row per refund actually made, with its date. Rows are only ever added, so the
+// history shows when and how much was given back (also several partial refunds).
+db.exec(`
+CREATE TABLE IF NOT EXISTS refunds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  note TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_refunds_order ON refunds(order_id);
+`);
 db.exec('CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id)');
 
 // ---------- Default settings (editable from /admin → Settings) ----------

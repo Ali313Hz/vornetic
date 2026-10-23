@@ -8,6 +8,19 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': 
 const eur = c => (c / 100).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 const toEuro = c => c == null ? '' : (c / 100).toFixed(2);
 const day = s => (s || '').slice(0, 16);
+// Euro text typed by the admin → cents. "12,50" "12.5" "12" are fine; anything else → null
+// (never silently 0), so a typo shows an error instead of being saved.
+function parseEuro(text) {
+  const m = /^\s*(\d{1,7})(?:[.,](\d{1,2}))?\s*$/.exec(String(text ?? ''));
+  return m ? Number(m[1]) * 100 + Number((m[2] || '').padEnd(2, '0')) : null;
+}
+// Warning for a paid order that was cancelled but not fully refunded (null = nothing to show)
+function refundWarning(o) {
+  if (!o.needs_refund) return null;
+  return o.refund_total_cents
+    ? `⚠ İade eksik: ${eur(o.refund_due_cents)} kaldı (${eur(o.refund_total_cents)} iade edildi)`
+    : `⚠ Ödendi ama iptal: ${eur(o.refund_due_cents)} iade edilmeli`;
+}
 
 async function api(url, opts = {}) {
   const isForm = opts.body instanceof FormData;
@@ -92,13 +105,23 @@ function bindOrderCards(scope, after = show) {
   $$('.order', scope).forEach(el => {
     $('.save', el).addEventListener('click', async () => {
       try {
-        const body = { status: $('.sts', el).value, tracking: $('.trk', el).value };
-        const rfd = $('.rfd', el);
-        if (rfd) body.refunded_cents = Math.round((Number(rfd.value.replace(',', '.')) || 0) * 100);
-        const r = await send('/api/admin/orders/' + el.dataset.id, body);
+        const r = await send('/api/admin/orders/' + el.dataset.id, { status: $('.sts', el).value, tracking: $('.trk', el).value });
         toast(r.mailed ? 'Kaydedildi · müşteriye e-posta gitti' : 'Kaydedildi'); after();
       } catch (e) { toast(e.message); }
     });
+    $('.addrfd', el)?.addEventListener('click', async () => {
+      const cents = parseEuro($('.rfd', el).value);
+      if (!cents) return toast('Geçersiz tutar — örnek: 12,50');
+      if (!confirm(`${eur(cents)} iade kaydı eklensin? (Kayıt sonradan silinemez.)`)) return;
+      try {
+        await send(`/api/admin/orders/${el.dataset.id}/refunds`, { amount_cents: cents, note: $('.rfdnote', el).value }, 'POST');
+        toast('İade kaydedildi'); after();
+      } catch (e) { toast(e.message); }
+    });
+    $$('[data-pchk]', el).forEach(btn => btn.addEventListener('click', async () => {
+      try { await send('/api/admin/orders/' + el.dataset.id, { payment_check: btn.dataset.pchk }); toast('Kaydedildi'); after(); }
+      catch (e) { toast(e.message); }
+    }));
     $('[data-cust]', el)?.addEventListener('click', () => { tab = 'customers'; drawTabs(); viewCustomer(+$('[data-cust]', el).dataset.cust); });
   });
 }
@@ -113,14 +136,14 @@ function orderHtml(o) {
     <div class="order-head">
       <div><b>${esc(o.ref)}</b> · <span class="muted">${esc(day(o.created_at))}</span> · <span class="muted">${esc(o.lang.toUpperCase())}</span>
         ${o.user_id ? ` · <button class="chip-btn small" data-cust="${o.user_id}">kayıtlı müşteri →</button>` : ' · <span class="muted small">misafir</span>'}</div>
-      <div>${o.needs_refund ? '<span class="status cancelled">⚠ Ödendi ama iptal — iade kaydı yok</span> ' : ''}${o.withdrawals ? '<span class="status pending">↩ Cayma talebi</span> ' : ''}<span class="status ${esc(o.status)}">${STATUS[o.status]}</span></div>
+      <div>${refundWarning(o) ? `<span class="status cancelled">${esc(refundWarning(o))}</span> ` : ''}${o.payment_unknown ? '<span class="status pending">⚠ Eski iptal: ödeme durumu bilinmiyor</span> ' : ''}${o.withdrawals ? '<span class="status pending">↩ Cayma talebi</span> ' : ''}<span class="status ${esc(o.status)}">${STATUS[o.status]}</span></div>
     </div>
     <div class="order-cols">
       <div class="items">${items.map(i => `<div><b>${i.qty}× ${esc(i.name)}</b> — ${eur(i.unit_cents * i.qty)}
         ${i.car ? `<small>🚗 ${esc(i.car)}</small>` : ''}${(i.options || []).map(x => `<small>${esc(x)}</small>`).join('')}</div>`).join('')}
         <div style="border:0">Kargo: ${eur(o.shipping_cents)} · <b>Toplam: ${eur(o.total_cents)}</b> · ${PAY[o.payment_method] || esc(o.payment_method)}
-          ${o.paid_at ? ` · Ödeme: ${esc(day(o.paid_at))}${o.paid_at_estimated ? ' (tahmini)' : ''}` : ''}
-          ${o.refunded_cents ? ` · <b>İade: ${eur(o.refunded_cents)}</b>` : ''}</div>
+          ${o.paid_at ? ` · Ödeme: ${esc(day(o.paid_at))}${o.paid_at_estimated ? ' (tahmini)' : ''}` : ''}</div>
+        ${JSON.parse(o.refunds || '[]').map(r => `<div style="border:0"><small>↩ İade ${esc(day(r.created_at))}: <b>${eur(r.amount_cents)}</b>${r.note ? ' — ' + esc(r.note) : ''}</small></div>`).join('')}
       </div>
       <div>
         <b>${esc(o.customer_name)}</b><br>
@@ -133,10 +156,14 @@ function orderHtml(o) {
     <div class="order-actions">
       <select class="in sts">${Object.entries(STATUS).map(([k, v]) => `<option value="${k}"${k === o.status ? ' selected' : ''}>${v}</option>`).join('')}</select>
       <input class="in trk" placeholder="Kargo takip no (Kargoda yapmadan önce yaz)" value="${esc(o.tracking)}" style="min-width:260px">
-      ${o.paid_at ? `<label class="small">İade edilen €
-        <input class="in rfd" inputmode="decimal" value="${(o.refunded_cents / 100).toFixed(2)}" style="width:100px"></label>` : ''}
       <button class="btn sm save">Kaydet</button>
     </div>
+    ${o.payment_unknown ? `<div class="order-actions"><span class="small">Bu eski iptal sipariş ödenmiş miydi?</span>
+      <button class="btn sm ghost" data-pchk="paid">Ödenmişti</button><button class="btn sm ghost" data-pchk="unpaid">Ödenmemişti</button></div>` : ''}
+    ${o.paid_at && o.refund_total_cents < o.total_cents ? `<div class="order-actions">
+      <input class="in rfd" inputmode="decimal" placeholder="İade € (ör. 12,50)" style="width:150px">
+      <input class="in rfdnote" placeholder="Not (isteğe bağlı)" maxlength="200" style="min-width:180px">
+      <button class="btn sm ghost addrfd">İade ekle</button></div>` : ''}
   </div>`;
 }
 
@@ -171,7 +198,7 @@ async function viewCustomer(id) {
   root.innerHTML = '<p class="muted">Yükleniyor…</p>';
   const { user: u, orders } = await api('/api/admin/customers/' + id);
   const wa = waUrl(u.phone, `Hola ${u.name}, te escribimos de Vornetic.`);
-  const spent = orders.filter(o => ['paid', 'shipped', 'delivered'].includes(o.status)).reduce((a, o) => a + o.total_cents, 0);
+  const spent = orders.filter(o => o.paid_at).reduce((a, o) => a + o.total_cents - o.refund_total_cents, 0);
   root.innerHTML = `
     <div class="section-head"><h2>${esc(u.name)}</h2><button class="btn ghost sm" id="back">← Müşteriler</button></div>
     <div class="order-cols" style="margin-bottom:20px">
@@ -656,9 +683,10 @@ async function viewStats() {
     <div class="stats">
       <div><b>${s.pending}</b><span>Ödeme bekleyen</span></div>
       <div><b>${s.to_ship}</b><span>Gönderilecek</span></div>
-      ${s.needs_refund ? `<div><b>${s.needs_refund}</b><span>⚠ İade kaydı eksik</span></div>` : ''}
+      ${s.needs_refund ? `<div><b>${s.needs_refund}</b><span>⚠ İadesi eksik iptal</span></div>` : ''}
+      ${s.payment_unknown ? `<div><b>${s.payment_unknown}</b><span>⚠ Ödemesi bilinmeyen eski iptal</span></div>` : ''}
       <div><b>${s.orders_30d}</b><span>Sipariş (30 gün)</span></div>
-      <div><b>${eur(s.revenue_30d)}</b><span>Ödenen ciro (30 gün)</span></div>
+      <div><b>${eur(s.revenue_30d)}</b><span>Net tahsilat (30 gün): ödenen ${eur(s.paid_30d)} − iade ${eur(s.refunded_30d)}</span></div>
       <div><b>${s.customers}</b><span>Kayıtlı müşteri</span></div>
     </div>
     <div class="box"><h3>Ürün görüntülenmeleri</h3>
