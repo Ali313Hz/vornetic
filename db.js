@@ -172,6 +172,29 @@ CREATE TABLE IF NOT EXISTS payment_checks (
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_payment_checks_order ON payment_checks(order_id);
+
+-- Finance tab: income and expenses entered by hand or imported from CSV (Amazon, Wallapop,
+-- wholesale, storage, gestor…). Website sales are NOT stored here: they are always read from
+-- orders and refunds, so they can never be counted twice. Amounts are EUR cents.
+CREATE TABLE IF NOT EXISTS finance_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL CHECK (kind IN ('income', 'expense')),
+  date TEXT NOT NULL,                    -- YYYY-MM-DD
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  category TEXT NOT NULL,
+  note TEXT DEFAULT '',
+  party TEXT DEFAULT '',                 -- buyer / supplier (optional)
+  reference TEXT DEFAULT '',             -- invoice or order number (optional)
+  country TEXT DEFAULT '',               -- ES, PT, FR… (optional)
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_finance_date ON finance_entries(date);
+
+-- The Finance tab asks "which payments / refunds fall in this month?" 13 times per page load;
+-- these indexes let SQLite jump to the month instead of reading the whole history each time.
+CREATE INDEX IF NOT EXISTS idx_orders_paid_at ON orders(paid_at);
+CREATE INDEX IF NOT EXISTS idx_refunds_created ON refunds(created_at);
 `);
 db.exec('CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id)');
 
