@@ -524,9 +524,11 @@ test('invalid refund amounts are rejected and saving the order never changes ref
 
 test('the admin page reads euro amounts strictly (typos are errors, not 0)', () => {
   const { parseEuro } = adminHelpers();
-  const ok = { '12,50': 1250, '12.5': 1250, '12': 1200, ' 7,05 ': 705, '0,99': 99, '1234567': 123456700 };
+  // Same formats as the finance CSV import (manual test 2026-10-23: "1.250,00" was refused by the form)
+  const ok = { '12,50': 1250, '12.5': 1250, '12': 1200, ' 7,05 ': 705, '0,99': 99, '1234567': 123456700,
+    '1.250,00': 125000, '1.234,50': 123450, '1,250.00': 125000, '12 €': 1200, '€ 12,50': 1250, '1.250.000,00': 125000000 };
   for (const [text, cents] of Object.entries(ok)) assert.strictEqual(parseEuro(text), cents, text);
-  for (const bad of ['abc', '', ' ', '12,505', '-5', '1.234,50', '12,', ',5', '12 €', '1e3', null, undefined])
+  for (const bad of ['abc', '', ' ', '12,505', '-5', '1.250', '1,250', '12,', ',5', '1e3', '1.25,00', '12.345.6', null, undefined])
     assert.strictEqual(parseEuro(bad), null, JSON.stringify(bad));
 });
 
