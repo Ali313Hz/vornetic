@@ -405,6 +405,107 @@ test('the admin form defaults to today in Madrid, not the UTC day', () => {
   assert.match(financeUi, /let finMonth = shopToday\(\)\.slice\(0, 7\)/);
 });
 
+// Codex P2 (28fce02): formula-like text must survive export → import unchanged and not double
+test('export → import round trip keeps formula-like text exactly and adds nothing', async () => {
+  const srv = await startServer();
+  try {
+    const tricky = [
+      { note: '=SUM(A1:A9)', party: '', reference: '' },
+      { note: '-10% descuento', party: '+34 600 000 000', reference: '' },
+      { note: '@tienda', party: '', reference: '=REF-1' },
+      { note: "'ya entre comillas", party: "''dos", reference: '' },
+      { note: 'normal', party: '', reference: '-F-77' },
+    ];
+    for (const [i, t] of tricky.entries())
+      assert.strictEqual((await srv.admin('POST', FIN + '/entries', { kind: 'income', amount_cents: 1000 + i, category: 'amazon', date: '2026-10-11', ...t })).status, 200);
+    const before = (await srv.admin('GET', FIN + '?month=2026-10')).body.entries;
+
+    const csv = (await srv.admin('GET', FIN + '/export.csv?month=2026-10')).text;
+    // still protected for spreadsheets: no cell starts with a formula character
+    for (const line of csv.replace(/^﻿/, '').trim().split('\r\n').slice(1))
+      for (const cell of line.split(';')) assert.doesNotMatch(cell.replace(/^"/, ''), /^[=+\-@]/, `unsafe cell in: ${line}`);
+    assert.ok(csv.includes("'=SUM(A1:A9)") && csv.includes("'+34 600 000 000") && csv.includes("'=REF-1") && csv.includes("''ya entre comillas"));
+
+    let r = await srv.admin('POST', FIN + '/import', { csv, dry_run: true });
+    assert.deepStrictEqual([r.body.errors.length, r.body.add_count, r.body.duplicates.length], [0, 0, 5], JSON.stringify(r.body));
+    r = await srv.admin('POST', FIN + '/import', { csv });
+    assert.deepStrictEqual([r.status, r.body.saved], [200, 0]);
+    assert.deepStrictEqual((await srv.admin('GET', FIN + '?month=2026-10')).body.entries, before, 'entries unchanged');
+
+    // What the importer reads back is the original text
+    const parsed = finance.readImport(csv, () => 0);
+    assert.deepStrictEqual(parsed.add.map(a => [a.note, a.party, a.reference]).sort(), tricky.map(t => [t.note, t.party, t.reference]).sort());
+  } finally { await srv.stop(); }
+});
+
+test('import: a leading apostrophe marks text; formulas without it are still refused', () => {
+  const head = 'type;date;amount;category;note;reference\n';
+  const ok = finance.readImport(head + "gelir;2026-10-01;5;amazon;'=1+2;'@ref", () => 0);
+  assert.deepStrictEqual(ok.errors, []);
+  assert.deepStrictEqual([ok.add[0].note, ok.add[0].reference], ['=1+2', '@ref']);
+  for (const cell of ['=1+2', '+1', '-1+1', '@SUM(A1)', '=HYPERLINK("http://x.example.test")']) {
+    const bad = finance.readImport(head + `gelir;2026-10-01;5;amazon;"${cell.replace(/"/g, '""')}";`, () => 0);
+    assert.strictEqual(bad.errors.length, 1, cell);
+    assert.match(bad.errors[0].msg, /Formül/);
+  }
+});
+
+// Codex P2 (28fce02): "|" inside a field must not make two different rows look the same
+test('duplicate keys are unambiguous when fields contain the old separator', async () => {
+  const k = e => finance.entryKey({ kind: 'income', date: '2026-10-01', amount_cents: 500, category: 'amazon', country: '', reference: '', ...e });
+  assert.notStrictEqual(k({ note: 'a|b', party: 'c' }), k({ note: 'a', party: 'b|c' }));
+  assert.notStrictEqual(k({ note: 'a', party: '' }), k({ note: '', party: 'a' }));
+  assert.strictEqual(k({ note: 'Xenon  D1S', party: 'ANA' }), k({ note: 'xenon d1s', party: 'ana' }), 'spaces/capitals still ignored');
+
+  const srv = await startServer();
+  try {
+    await srv.admin('POST', FIN + '/entries', { kind: 'income', amount_cents: 500, category: 'amazon', date: '2026-10-01', note: 'a|b', party: 'c' });
+    const r = await srv.admin('POST', FIN + '/import', { csv: 'type;date;amount;category;note;party\ngelir;2026-10-01;5;amazon;a;b|c' });
+    assert.deepStrictEqual([r.status, r.body.saved, r.body.duplicates.length], [200, 1, 0]);
+  } finally { await srv.stop(); }
+});
+
+// Codex P2 (28fce02): the monthly queries can use an index instead of scanning all history
+test('orders.paid_at and refunds.created_at are indexed and used by the monthly report', async () => {
+  const srv = await startServer();
+  try {
+    const db = new DatabaseSync(path.join(srv.dataDir, 'store.db'));
+    try {
+      const idx = db.prepare("SELECT name, tbl_name FROM sqlite_master WHERE type = 'index' AND name IN ('idx_orders_paid_at', 'idx_refunds_created') ORDER BY name").all();
+      assert.deepStrictEqual(idx.map(i => [i.name, i.tbl_name]), [['idx_orders_paid_at', 'orders'], ['idx_refunds_created', 'refunds']]);
+      const plan = sql => db.prepare('EXPLAIN QUERY PLAN ' + sql).all('2026-03-31 22:00:00', '2026-04-30 22:00:00').map(r => r.detail).join(' / ');
+      assert.match(plan('SELECT COUNT(*), SUM(total_cents) FROM orders WHERE paid_at >= ? AND paid_at < ?'), /idx_orders_paid_at/);
+      assert.match(plan('SELECT COUNT(*), SUM(amount_cents) FROM refunds WHERE created_at >= ? AND created_at < ?'), /idx_refunds_created/);
+    } finally { db.close(); }
+  } finally { await srv.stop(); }
+});
+
+// Gemini (PR #10) asked about sorting by the Madrid date in the CSV. Checked here: rows are ordered
+// by the date the file shows (Madrid), so a payment at 00:30 on 1 April sits with the April rows.
+test('CSV rows are in order of the Madrid date shown in the file', async () => {
+  const dir = tempDir();
+  try {
+    oldDatabase(dir, [
+      { ref: 'VN-APR1', status: 'delivered', total: 8000, created_at: '2026-03-31 22:30:00' },   // 1 Apr 00:30 Madrid
+      { ref: 'VN-MAR31', status: 'delivered', total: 4000, created_at: '2026-03-31 21:00:00' },  // 31 Mar 23:00 Madrid
+    ]);
+    const srv = await startServer({}, dir);
+    try {
+      await srv.admin('POST', FIN + '/entries', entry({ date: '2026-04-01', category: 'gestor', amount_cents: 100 }));
+      await srv.admin('POST', FIN + '/entries', entry({ date: '2026-03-31', category: 'storage', amount_cents: 200 }));
+      await srv.admin('POST', FIN + '/entries', entry({ date: '2026-04-02', category: 'packaging', amount_cents: 300 }));
+      const lines = (await srv.admin('GET', FIN + '/export.csv')).text.replace(/^﻿/, '').trim().split('\r\n').slice(1);
+      const dates = lines.map(l => l.split(';')[2]);
+      assert.deepStrictEqual(dates, [...dates].sort(), 'dates out of order: ' + dates.join(', '));
+      const at = ref => lines.findIndex(l => l.endsWith(ref));
+      assert.strictEqual(lines[at('VN-APR1')].split(';')[2], '2026-04-01');
+      assert.ok(at('VN-MAR31') < at('VN-APR1'));
+      assert.ok(lines.findIndex(l => l.includes('Depo')) < at('VN-APR1'), 'the 31 March expense comes before the 1 April payment');
+      assert.ok(at('VN-APR1') < lines.findIndex(l => l.includes('Ambalaj')), 'and the 2 April expense after it');
+    } finally { await srv.stop(); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('import: missing columns, empty files and oversized batches are refused', async () => {
   const srv = await startServer();
   try {
