@@ -107,7 +107,14 @@ pm2 save && pm2 startup
 ```
 HTTPS için Nginx + Certbot (ücretsiz) — müşteri şifreleri olduğu için **HTTPS şart**. Alan adının DNS A kaydını sunucu IP'sine yönlendir.
 
-**`PUBLIC_URL` canlıda zorunlu:** `NODE_ENV=production` iken `PUBLIC_URL` yoksa, `https://` ile başlamıyorsa ya da adresten sonra yol içeriyorsa (ör. `/magaza`) site **açılmaz** ve kayıtta nedenini yazar. Şifre sıfırlama, sipariş e-postaları, Stripe dönüş sayfaları ve sitemap linkleri sadece bu adresten üretilir; böylece sahte bir `Host` başlığıyla müşteriye başka bir siteye giden link gönderilemez. Canlıda site ayrıca tarayıcılara `Strict-Transport-Security` başlığı gönderir (bir yıl boyunca sadece https).
+**Nginx ayarı:** hazır dosya `docs/nginx-vornetic.conf` — dosyanın başındaki 3 adımı sırayla uygula (önce ücretsiz Let's Encrypt sertifikası, sonra dosyayı kur). Önemli kurallar:
+- Port 80 (http) her zaman `https://` adresine **yönlendirilir**; uygulamaya http ile hiçbir şey gitmez.
+- Bilinmeyen alan adları / IP ile gelen istekler kapatılır (`return 444`), sahte `Host` başlığı uygulamaya ulaşmaz.
+- Nginx `X-Forwarded-Proto` ve `X-Forwarded-For` başlıklarını **üzerine yazar** (`$scheme`, `$remote_addr`).
+- Nginx ve uygulama **aynı sunucuda** olmalı: canlıda uygulama sadece `127.0.0.1:3300` adresini dinler ve bu başlıklara sadece aynı makineden gelirse güvenir. Uygulama yine de http ile gelen bir istek alırsa sayfayı https'e yönlendirir, giriş/sipariş/panel gibi diğer istekleri işlemeden reddeder (403 "HTTPS required").
+- `HOST` ile dinleme adresi değiştirilebilir (ör. `HOST=0.0.0.0`) ama gerek yok; değiştirirsen sunucunun güvenlik duvarında 3300 portunu dışarıya kapat.
+
+**`PUBLIC_URL` canlıda zorunlu:** `NODE_ENV=production` iken `PUBLIC_URL` yoksa, `https://` ile başlamıyorsa, adresten sonra yol, `?` veya `#` içeriyorsa (ör. `/magaza`), alan adı ya da port geçersizse site **açılmaz** ve kayıtta nedenini yazar (girilen değeri yazmaz — içinde şifre olabilir). Şifre sıfırlama, sipariş e-postaları, Stripe dönüş sayfaları ve sitemap linkleri sadece bu adresten üretilir; böylece sahte bir `Host` başlığıyla müşteriye başka bir siteye giden link gönderilemez. Canlıda site ayrıca tarayıcılara `Strict-Transport-Security` başlığı gönderir (bir yıl boyunca sadece https).
 
 Yayına aldıktan sonra:
 - **Google Search Console** → siteyi ekle → `https://vornetic.com/sitemap.xml` gönder.
@@ -129,6 +136,7 @@ Yayına aldıktan sonra:
 | `PUBLIC_URL` | Sitenin adresi, ör. `https://vornetic.com` (e-posta linkleri, Stripe, sitemap). **Canlıda zorunlu**, `https://` ile ve yolsuz |
 | `NODE_ENV=production` | Canlıda ayarla (güvenli çerezler, HSTS, `PUBLIC_URL` kontrolü) |
 | `PORT` | Varsayılan 3300 |
+| `HOST` | Dinleme adresi. Canlıda varsayılan `127.0.0.1` (sadece Nginx üzerinden erişilir); genelde ayarlama |
 | `DATA_DIR` | Veritabanı/fotoğraf klasörü (varsayılan `./data`) |
 
 ## Ampul listesi

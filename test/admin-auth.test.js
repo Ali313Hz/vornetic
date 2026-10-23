@@ -12,6 +12,10 @@ const net = require('node:net');
 const ROOT = path.join(__dirname, '..');
 const TEST_PASSWORD = 'test-only-admin-password-123';
 const PROD_URL = 'https://shop.example.test';   // production mode requires PUBLIC_URL
+const { INHERITED_SETTINGS, VIA_PROXY } = require('./helpers');
+// Every request in this file arrives "through Nginx" (X-Forwarded-Proto: https): in production
+// the app only serves https. Plain-http behaviour is tested in public-url.test.js.
+const fetch = (url, opts = {}) => globalThis.fetch(url, { ...opts, headers: { ...VIA_PROXY, ...opts.headers } });
 
 const freePort = () => new Promise((resolve, reject) => {
   const s = net.createServer().listen(0, '127.0.0.1', () => {
@@ -39,9 +43,9 @@ async function startServer(env = {}, dataDir, { readyText = 'Vornetic →', time
   };
   try {
     const port = await freePort();
-    const childEnv = { ...process.env, PORT: String(port), DATA_DIR: dataDir, NODE_ENV: 'test', ...env };
-    for (const k of Object.keys(childEnv)) if (childEnv[k] === undefined) delete childEnv[k];
-    for (const k of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'STRIPE_SECRET_KEY']) delete childEnv[k];
+    const childEnv = { ...process.env, PORT: String(port), DATA_DIR: dataDir, NODE_ENV: 'test' };
+    for (const k of INHERITED_SETTINGS) delete childEnv[k];
+    for (const [k, v] of Object.entries(env)) if (v === undefined) delete childEnv[k]; else childEnv[k] = v;
     child = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     // Listen for 'close' from the start: it may fire before cleanup runs (e.g. the server crashed)
     closed = new Promise(r => child.once('close', r));

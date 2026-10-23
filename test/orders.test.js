@@ -11,6 +11,7 @@ const path = require('node:path');
 const net = require('node:net');
 const http = require('node:http');
 const { DatabaseSync } = require('node:sqlite');
+const { INHERITED_SETTINGS, VIA_PROXY } = require('./helpers');
 
 const ROOT = path.join(__dirname, '..');
 const ADMIN_PASSWORD = 'test-only-admin-password-123';
@@ -46,8 +47,8 @@ async function startServer(env = {}, dataDir) {
   try {
     const port = await freePort();
     const childEnv = { ...process.env, PORT: String(port), DATA_DIR: dataDir, NODE_ENV: 'test', ADMIN_PASSWORD };
-    for (const k of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'MAIL_FROM', 'STRIPE_SECRET_KEY', 'STRIPE_API_URL']) delete childEnv[k];
-    Object.assign(childEnv, env);
+    for (const k of INHERITED_SETTINGS) delete childEnv[k];
+    for (const [k, v] of Object.entries(env)) if (v === undefined) delete childEnv[k]; else childEnv[k] = v;
     child = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     closed = new Promise(r => child.once('close', r));
     await new Promise((resolve, reject) => {
@@ -59,13 +60,13 @@ async function startServer(env = {}, dataDir) {
     });
     const base = `http://127.0.0.1:${port}`;
     const res = await fetch(base + '/api/admin/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ADMIN_PASSWORD }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...VIA_PROXY }, body: JSON.stringify({ password: ADMIN_PASSWORD }),
     });
     assert.strictEqual(res.status, 200);
     const cookie = res.headers.get('set-cookie').split(';')[0];
     const call = async (method, url, body, headers = {}) => {
       const r = await fetch(base + url, {
-        method, headers: { 'Content-Type': 'application/json', ...headers }, body: body && JSON.stringify(body),
+        method, headers: { 'Content-Type': 'application/json', ...VIA_PROXY, ...headers }, body: body && JSON.stringify(body),
       });
       return { status: r.status, body: await r.json() };
     };

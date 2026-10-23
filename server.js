@@ -28,19 +28,35 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 // the request's Host header, which anyone can fake: a password-reset e-mail could then point to
 // someone else's site and hand them the reset token. So in production it is required, must be
 // https:// and must be just the address (no path). In development it is optional.
+//
+// The raw text is checked before anything is normalised (a URL parser would quietly "fix"
+// values like "https:shop.com", "https:\\shop.com" or "https://shop.com?" into something else).
+// Accepted: https://host[:port] with an optional final "/". In development http:// and a
+// one-word host such as localhost are fine too.
+// Problems are reported by kind only: the value is never printed, because a mistyped value can
+// contain a password or token, and server logs are often kept and forwarded.
+const HOST_LABEL = /^(?!-)[a-z0-9-]{1,63}(?<!-)$/;
+function checkPublicUrl(value) {
+  if (!value) return { problem: 'is not set' };
+  if (/[\s\\@\u0000-\u001f\u007f]/.test(value)) return { problem: 'contains a space, backslash, "@" or login details' };
+  if (!/^https?:\/\//i.test(value) || (IS_PROD && !/^https:\/\//i.test(value))) return { problem: 'must start with https://' };
+  const m = /^(https?):\/\/([^/?#:]+)(?::(\d*))?\/?$/i.exec(value);
+  if (!m) return { problem: 'must be only the address: no path, "?", "#" or anything after the host and port' };
+  const [, scheme, rawHost, port] = m;
+  const host = rawHost.toLowerCase(), labels = host.split('.');
+  if (labels.some(l => !HOST_LABEL.test(l)) || (IS_PROD && labels.length < 2)) return { problem: 'has an invalid host name' };
+  if (port !== undefined && (!/^[1-9]\d{0,4}$/.test(port) || Number(port) > 65535)) return { problem: 'has an invalid port' };
+  const defaultPort = scheme.toLowerCase() === 'https' ? '443' : '80';
+  return { url: `${scheme.toLowerCase()}://${host}${port && port !== defaultPort ? ':' + port : ''}` };
+}
 function publicUrl(raw) {
-  const value = String(raw || '').trim();
-  let u = null;
-  try { u = value ? new URL(value) : null; } catch { /* invalid, handled below */ }
-  const ok = u && (u.protocol === 'https:' || (!IS_PROD && u.protocol === 'http:'))
-    && u.pathname === '/' && !u.search && !u.hash && !u.username && !u.password;
-  if (ok) return u.origin;
-  const why = value ? `PUBLIC_URL "${value}" is not valid` : 'PUBLIC_URL is not set';
+  const { url, problem } = checkPublicUrl(String(raw ?? '').trim());
+  if (url) return url;
   if (IS_PROD) {
-    console.error(`✖  ${why}. In production set it in .env to the shop's https address, e.g. PUBLIC_URL=https://vornetic.com`);
+    console.error(`✖  PUBLIC_URL ${problem} (value not shown). In production set it in .env to the shop's https address, e.g. PUBLIC_URL=https://vornetic.com`);
     process.exit(1);
   }
-  if (value) console.warn(`⚠  ${why}; using the address of each request (fine for local testing only).`);
+  if (problem !== 'is not set') console.warn(`⚠  PUBLIC_URL ${problem} (value not shown); using the address of each request (fine for local testing only).`);
   return '';
 }
 const PUBLIC_URL = publicUrl(process.env.PUBLIC_URL);
@@ -60,7 +76,10 @@ const countries = s => ALL_COUNTRIES.filter(c => c !== 'PT' || s.ship_pt_on !== 
 const STATUSES = ['pending', 'paid', 'shipped', 'delivered', 'cancelled'];
 
 app.disable('x-powered-by');
-app.set('trust proxy', 1);
+// Nginx runs on the same server (README, docs/nginx-vornetic.conf). Only a request coming from this
+// machine may tell us via X-Forwarded-Proto / X-Forwarded-For that the visitor used https and what
+// their IP is; a request from anywhere else can't fake those headers (they are ignored).
+app.set('trust proxy', 'loopback');
 app.use((req, res, next) => {
   res.set({
     'X-Content-Type-Options': 'nosniff',
@@ -71,6 +90,16 @@ app.use((req, res, next) => {
     ...(IS_PROD && { 'Strict-Transport-Security': 'max-age=31536000' }),
   });
   next();
+});
+// Production: customer data only over https. Nginx itself redirects port 80 to https, so normally
+// no plain-http request arrives here. If one still does (port 80 proxied by mistake, or the app
+// reached directly), pages are redirected to the https address, and everything else — login,
+// checkout, admin — is refused without being processed, so it has to be sent again over https.
+// "https" is only believed when Nginx on this machine says so (trust proxy above).
+if (IS_PROD) app.use((req, res, next) => {
+  if (req.secure) return next();
+  if (req.method === 'GET' || req.method === 'HEAD') return res.redirect(301, PUBLIC_URL + req.originalUrl);
+  res.status(403).json({ error: 'HTTPS required' });
 });
 app.use(express.json({ limit: '200kb' }));
 app.use(cookieParser());
@@ -1011,7 +1040,10 @@ app.get(/^\/(?!api|uploads).*/, (req, res) => {
 backup();
 setInterval(backup, 6 * 3600 * 1000).unref();
 
-const server = app.listen(PORT, () => {
+// In production listen on this machine only: visitors reach the app through Nginx (https), never
+// directly over plain http. HOST can override it (e.g. HOST=0.0.0.0), but read the README first.
+const HOST = process.env.HOST || (IS_PROD ? '127.0.0.1' : undefined);
+const server = app.listen(PORT, HOST, () => {
   // Only once the port is ours: a start that fails (e.g. EADDRINUSE because another instance
   // is running on the same data) must not log out that instance's admins.
   revokeAdminSessions();

@@ -23,6 +23,12 @@ const freePort = () => new Promise((resolve, reject) => {
   }).on('error', reject);
 });
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'vornetic-test-'));
+// Server settings a test must never inherit from the environment it runs in
+const INHERITED_SETTINGS = ['PUBLIC_URL', 'HOST', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'MAIL_FROM',
+  'STRIPE_SECRET_KEY', 'STRIPE_API_URL'];
+// In production the app only serves https requests, as reported by Nginx on the same machine.
+// Test requests come from 127.0.0.1 too, so they send the header Nginx would add.
+const VIA_PROXY = { 'X-Forwarded-Proto': 'https' };
 
 async function startServer(env = {}, dataDir) {
   const ownDir = !dataDir;
@@ -38,8 +44,10 @@ async function startServer(env = {}, dataDir) {
   try {
     const port = await freePort();
     const childEnv = { ...process.env, PORT: String(port), DATA_DIR: dataDir, NODE_ENV: 'test', ADMIN_PASSWORD };
-    for (const k of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'MAIL_FROM', 'STRIPE_SECRET_KEY', 'STRIPE_API_URL']) delete childEnv[k];
-    Object.assign(childEnv, env);
+    // Settings inherited from the developer's shell or CI must not leak into a test: every test
+    // starts from none of them and sets only what it needs (undefined = make sure it is unset)
+    for (const k of INHERITED_SETTINGS) delete childEnv[k];
+    for (const [k, v] of Object.entries(env)) if (v === undefined) delete childEnv[k]; else childEnv[k] = v;
     child = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     closed = new Promise(r => child.once('close', r));
     await new Promise((resolve, reject) => {
@@ -51,13 +59,13 @@ async function startServer(env = {}, dataDir) {
     });
     const base = `http://127.0.0.1:${port}`;
     const res = await fetch(base + '/api/admin/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ADMIN_PASSWORD }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...VIA_PROXY }, body: JSON.stringify({ password: ADMIN_PASSWORD }),
     });
     assert.strictEqual(res.status, 200);
     const cookie = res.headers.get('set-cookie').split(';')[0];
     const call = async (method, url, body, headers = {}) => {
       const r = await fetch(base + url, {
-        method, headers: { 'Content-Type': 'application/json', ...headers }, body: body && JSON.stringify(body),
+        method, headers: { 'Content-Type': 'application/json', ...VIA_PROXY, ...headers }, body: body && JSON.stringify(body),
       });
       const text = Buffer.from(await r.arrayBuffer()).toString('utf8');   // keeps a BOM, unlike r.text()
       let json = null;
@@ -142,4 +150,4 @@ async function fakeSmtp() {
   };
 }
 
-module.exports = { ROOT, ADMIN_PASSWORD, CUSTOMER, tempDir, startServer, oldDatabase, fakeSmtp };
+module.exports = { ROOT, ADMIN_PASSWORD, CUSTOMER, tempDir, startServer, oldDatabase, fakeSmtp, INHERITED_SETTINGS, VIA_PROXY };
