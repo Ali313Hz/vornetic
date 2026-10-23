@@ -132,7 +132,10 @@ test('more than one file per request is rejected with 400 and nothing is stored'
   assert.deepStrictEqual(listUploads(), before, 'partial files cleaned up');
 });
 
-test('a video up to 80 MB is accepted; one byte more is refused and nothing is stored', async () => {
+// Codex P2 (PR #14, 5c9446a): Multer 2.0–2.2 refused a file of exactly limits.fileSize bytes (verified
+// locally on 2.0.2/2.1.1/2.2.0; 2.3.0+ accept it). The server no longer depends on that: Multer's
+// limit is a little above 80 MiB and the exact 80 MiB maximum is checked on the finished file.
+test('a video of exactly 80 MiB is accepted; anything larger is refused and nothing is stored', async () => {
   const MB = 1024 * 1024;
   let before = listUploads();
   const ok = await upload([['max.mp4', Buffer.alloc(80 * MB)]]);
@@ -140,9 +143,21 @@ test('a video up to 80 MB is accepted; one byte more is refused and nothing is s
   assert.strictEqual((await ok.json()).media[0].type, 'video');
   assert.strictEqual(listUploads().length, before.length + 1);
   before = listUploads();
-  const big = await upload([['too-big.mp4', Buffer.alloc(80 * MB + 1)]]);
-  assert.strictEqual(big.status, 400);
-  assert.match((await big.json()).error, /too large/i);
+  for (const size of [80 * MB + 1, 80 * MB + 512, 80 * MB + 1024 + 1, 81 * MB]) {
+    // +1 and +512 pass Multer and are refused by the server's own check; the others by Multer itself
+    const big = await upload([['too-big.mp4', Buffer.alloc(size)]]);
+    assert.strictEqual(big.status, 400, `size ${size}`);
+    assert.match((await big.json()).error, /too large/i, `size ${size}`);
+    assert.deepStrictEqual(listUploads(), before, `nothing stored for size ${size}`);
+  }
+});
+
+test('a photo over 12 MB that reaches the server is still not kept', async () => {
+  // The admin page shrinks big photos first; anything that still arrives over 12 MB is discarded
+  const before = listUploads();
+  const res = await upload([['huge.jpg', Buffer.alloc(12 * 1024 * 1024 + 1)]]);
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual((await res.json()).media, []);
   assert.deepStrictEqual(listUploads(), before);
 });
 

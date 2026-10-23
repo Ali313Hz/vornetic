@@ -111,6 +111,11 @@ app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
 // sends a selection of several files one after another. Nginx must accept one full-size video plus
 // the form overhead: client_max_body_size 81m in docs/nginx-vornetic.conf (checked by a test).
 const MAX_VIDEO_MB = 80, MAX_PHOTO_MB = 12;
+const MAX_VIDEO_BYTES = MAX_VIDEO_MB * 1024 * 1024, MAX_PHOTO_BYTES = MAX_PHOTO_MB * 1024 * 1024;
+// Multer's own limit is set a little ABOVE the maximum and the exact maximum is checked below on the
+// finished file: Multer 2.0–2.2 rejected a file of exactly limits.fileSize bytes (2.3+ accepts it),
+// so this way a video of exactly 80 MB is accepted whatever Multer version is installed.
+const MULTER_FILE_LIMIT = MAX_VIDEO_BYTES + 1024;
 const IMG_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
 const VID_EXT = ['.mp4', '.webm'];
 const upload = multer({
@@ -119,7 +124,7 @@ const upload = multer({
     filename: (req, file, cb) =>
       cb(null, crypto.randomBytes(8).toString('hex') + path.extname(file.originalname).toLowerCase()),
   }),
-  limits: { fileSize: MAX_VIDEO_MB * 1024 * 1024, files: 1 },
+  limits: { fileSize: MULTER_FILE_LIMIT, files: 1 },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const ok = IMG_EXT.includes(ext) || VID_EXT.includes(ext);
@@ -665,7 +670,12 @@ app.post('/api/admin/upload', requireAdmin, upload.array('files', 1), (req, res)
   const out = [];
   for (const f of req.files || []) {
     const isVideo = VID_EXT.includes(path.extname(f.filename));
-    if (!isVideo && f.size > MAX_PHOTO_MB * 1024 * 1024) { fs.unlinkSync(f.path); continue; }   // photos max 12 MB
+    // The exact maximum, on the finished file (Multer's limit is a little higher, see MULTER_FILE_LIMIT)
+    if (isVideo && f.size > MAX_VIDEO_BYTES) {
+      fs.unlinkSync(f.path);
+      return res.status(400).json({ error: `File too large — video en fazla ${MAX_VIDEO_MB} MB` });
+    }
+    if (!isVideo && f.size > MAX_PHOTO_BYTES) { fs.unlinkSync(f.path); continue; }   // photos max 12 MB
     out.push({ type: isVideo ? 'video' : 'image', src: '/uploads/' + f.filename });
   }
   res.json({ ok: true, media: out });

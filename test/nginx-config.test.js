@@ -75,34 +75,56 @@ test('nginx config: proxies to the app on 127.0.0.1 and overwrites the forwarded
 // Codex P2 (PR #14): the body limit must fit the largest request the app accepts — and no more
 test('nginx config: upload limit = one maximum-size video plus form overhead, matching server.js', () => {
   const videoMb = Number(/const MAX_VIDEO_MB = (\d+)/.exec(server)[1]);
-  assert.match(server, /limits: \{ fileSize: MAX_VIDEO_MB \* 1024 \* 1024, files: 1 \}/, 'one file per request');
+  assert.match(server, /limits: \{ fileSize: MULTER_FILE_LIMIT, files: 1 \}/, 'one file per request');
   assert.match(server, /upload\.array\('files', 1\)/);
+  // Multer's limit sits just above the maximum (exact maximum checked in the route), never far above it
+  const slack = Number(/const MULTER_FILE_LIMIT = MAX_VIDEO_BYTES \+ (\d+);/.exec(server)[1]);
+  assert.ok(slack > 0 && slack <= 64 * 1024, 'MULTER_FILE_LIMIT must be a little above MAX_VIDEO_BYTES');
+  assert.match(server, /if \(isVideo && f\.size > MAX_VIDEO_BYTES\) \{\s*fs\.unlinkSync\(f\.path\);\s*return res\.status\(400\)/, 'exact maximum checked on the finished file');
   const limits = code.filter(l => /^client_max_body_size\s/.test(l));
   assert.strictEqual(limits.length, 1);
   const mb = Number(/^client_max_body_size (\d+)m;$/.exec(limits[0])[1]);
-  assert.ok(mb >= videoMb + 1, `client_max_body_size ${mb}m is too small for one ${videoMb} MB video plus form overhead`);
+  assert.ok(mb * 1024 * 1024 >= videoMb * 1024 * 1024 + slack + 64 * 1024, `client_max_body_size ${mb}m is too small for one ${videoMb} MB video plus form overhead`);
   assert.ok(mb <= videoMb + 5, `client_max_body_size ${mb}m is much larger than any request the app accepts`);
 });
 
-test('the admin page uploads one file per request and skips files over the limits first', () => {
+// Codex P2 (PR #14, 5c9446a): the install steps run from the project folder, where the file is docs/…
+test('nginx config: the install command copies the file from where it really is', () => {
+  const cp = conf.split(/\r?\n/).find(l => /sudo cp .*\/etc\/nginx\/sites-available\/vornetic/.test(l));
+  assert.ok(cp, 'install command not found');
+  const src = /sudo cp (\S+) /.exec(cp)[1];
+  assert.strictEqual(src, 'docs/nginx-vornetic.conf');
+  assert.ok(fs.existsSync(path.join(ROOT, src)), 'path is relative to the project folder (where package.json is)');
+  assert.ok(fs.existsSync(path.join(ROOT, 'package.json')));
+  assert.match(conf, /run these in the project folder/);
+});
+
+// Codex P2 (PR #14, 5c9446a): big photos must reach shrinkImage() before any size check
+test('the admin page uploads one file per request; videos are checked first, photos after shrinking', () => {
   const admin = fs.readFileSync(path.join(ROOT, 'public', 'js', 'admin.js'), 'utf8');
-  const fn = admin.match(/^function planUploads[\s\S]*?^\}\r?$/m);
-  assert.ok(fn, 'planUploads not found in admin.js');
-  const planUploads = new Function(fn[0] + '\nreturn planUploads;')();
+  const grab = re => { const m = admin.match(re); assert.ok(m, 'not found in admin.js: ' + re); return m[0]; };
+  const { planUploads, photoTooBig } = new Function([grab(/^const uploadLimits = .*$/m),
+    grab(/^function planUploads[\s\S]*?^\}\r?$/m), grab(/^function photoTooBig[\s\S]*?^\}\r?$/m)].join('\n')
+    + '\nreturn { planUploads, photoTooBig };')();
   const MB = 1024 * 1024;
   const limits = { photo_mb: 12, video_mb: 80, photo_ext: ['.jpg', '.jpeg', '.png', '.webp'], video_ext: ['.mp4', '.webm'] };
   const files = [
     { name: 'a.mp4', size: 60 * MB }, { name: 'b.MP4', size: 60 * MB }, { name: 'c.webm', size: 80 * MB },
-    { name: 'd.mp4', size: 80 * MB + 1 }, { name: 'e.jpg', size: 5 * MB }, { name: 'f.png', size: 12 * MB + 1 },
-    { name: 'g.gif', size: 10 }, { name: 'noext', size: 10 },
+    { name: 'd.mp4', size: 80 * MB + 1 }, { name: 'e.jpg', size: 5 * MB }, { name: 'camera.JPG', size: 25 * MB },
+    { name: 'f.png', size: 12 * MB + 1 }, { name: 'g.gif', size: 10 }, { name: 'noext', size: 10 },
   ];
   const { send, skipped } = planUploads(files, limits);
-  assert.deepStrictEqual(send.map(f => f.name), ['a.mp4', 'b.MP4', 'c.webm', 'e.jpg'], 'two 60 MB videos are both sent (one request each)');
-  assert.strictEqual(skipped.length, 4);
+  assert.deepStrictEqual(send.map(f => f.name), ['a.mp4', 'b.MP4', 'c.webm', 'e.jpg', 'camera.JPG', 'f.png'],
+    'two 60 MB videos are both sent (one request each); big photos go on to be shrunk');
+  assert.deepStrictEqual(skipped.length, 3);
   assert.match(skipped.join('\n'), /d\.mp4: video en fazla 80 MB/);
-  assert.match(skipped.join('\n'), /f\.png: fotoğraf en fazla 12 MB/);
-  // uploadFiles: a new FormData with one file for each request
-  const up = admin.match(/^async function uploadFiles[\s\S]*?^\}\r?$/m)[0];
-  assert.match(up, /for \(const \[i, f\] of send\.entries\(\)\) \{[\s\S]*const fd = new FormData\(\);\s*fd\.append\('files', await shrinkImage\(f\)\);\s*const r = await api\('\/api\/admin\/upload'/);
+  // after shrinkImage(): a 25 MB photo that became 0.6 MB is fine; one still over 12 MB is skipped
+  assert.strictEqual(photoTooBig({ name: 'camera.JPG' }, { size: 0.6 * MB }, limits), null);
+  assert.strictEqual(photoTooBig({ name: 'f.png' }, { size: 12 * MB }, limits), null, 'exactly 12 MB is fine');
+  assert.match(photoTooBig({ name: 'f.png' }, { size: 12 * MB + 1 }, limits), /f\.png: küçültüldükten sonra bile 12 MB'tan büyük/);
+  assert.strictEqual(photoTooBig({ name: 'a.mp4' }, { size: 80 * MB }, limits), null, 'videos were checked before');
+  // uploadFiles: shrink first, check, then one file per request
+  const up = grab(/^async function uploadFiles[\s\S]*?^\}\r?$/m);
+  assert.match(up, /for \(const \[i, f\] of send\.entries\(\)\) \{[\s\S]*const ready = await shrinkImage\(f\);\s*const tooBig = photoTooBig\(f, ready, ME\.upload\);\s*if \(tooBig\) \{ skipped\.push\(tooBig\); continue; \}\s*const fd = new FormData\(\);\s*fd\.append\('files', ready\);\s*const r = await api\('\/api\/admin\/upload'/);
   assert.strictEqual((up.match(/fd\.append\(/g) || []).length, 1, 'exactly one file appended per request');
 });

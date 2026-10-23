@@ -330,20 +330,29 @@ async function shrinkImage(file) {
     return blob ? new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file;
   } catch { return file; }
 }
-// Which selected files can be uploaded: right type and not too big (limits come from the server,
-// GET /api/admin/me). Files that would be refused anyway are skipped before using any bandwidth.
+// Upload limits from the server (GET /api/admin/me), with the same defaults
+const uploadLimits = limits => ({ photo_mb: 12, video_mb: 80, photo_ext: ['.jpg', '.jpeg', '.png', '.webp'], video_ext: ['.mp4', '.webm'], ...limits });
+// Which selected files to try: the right type, and videos not over the limit (they are sent as they
+// are, so a too-big one is skipped before using any bandwidth). Photos are NOT size-checked here:
+// a big camera photo is usually shrunk well under the limit first (shrinkImage, see photoTooBig).
 function planUploads(list, limits) {
-  const lim = { photo_mb: 12, video_mb: 80, photo_ext: ['.jpg', '.jpeg', '.png', '.webp'], video_ext: ['.mp4', '.webm'], ...limits };
+  const lim = uploadLimits(limits);
   const send = [], skipped = [];
   for (const f of list) {
     const ext = (/\.[^.]+$/.exec(f.name || '') || [''])[0].toLowerCase();
     const video = lim.video_ext.includes(ext), photo = lim.photo_ext.includes(ext);
-    const maxMb = video ? lim.video_mb : lim.photo_mb;
     if (!video && !photo) skipped.push(`${f.name}: sadece JPG, PNG, WEBP fotoğraf veya MP4, WEBM video`);
-    else if (f.size > maxMb * 1024 * 1024) skipped.push(`${f.name}: ${video ? 'video' : 'fotoğraf'} en fazla ${maxMb} MB`);
+    else if (video && f.size > lim.video_mb * 1024 * 1024) skipped.push(`${f.name}: video en fazla ${lim.video_mb} MB`);
     else send.push(f);
   }
   return { send, skipped };
+}
+// After shrinking: is this photo still over the limit? (message, or null when it can be sent)
+function photoTooBig(original, shrunk, limits) {
+  const lim = uploadLimits(limits);
+  const ext = (/\.[^.]+$/.exec(original.name || '') || [''])[0].toLowerCase();
+  if (!lim.photo_ext.includes(ext) || shrunk.size <= lim.photo_mb * 1024 * 1024) return null;
+  return `${original.name}: küçültüldükten sonra bile ${lim.photo_mb} MB'tan büyük`;
 }
 // One file per request (the server accepts one), one after another, so every request stays under
 // the server's and Nginx's size limit even when many large videos are selected together.
@@ -357,8 +366,11 @@ async function uploadFiles(files) {
     for (const [i, f] of send.entries()) {
       note.textContent = `${f.type.startsWith('video/') ? 'Video yükleniyor' : 'Yükleniyor'} ${i + 1}/${send.length}… sayfayı kapatma`;
       try {
+        const ready = await shrinkImage(f);
+        const tooBig = photoTooBig(f, ready, ME.upload);
+        if (tooBig) { skipped.push(tooBig); continue; }
         const fd = new FormData();
-        fd.append('files', await shrinkImage(f));
+        fd.append('files', ready);
         const r = await api('/api/admin/upload', { method: 'POST', body: fd });
         if (!r.media.length) skipped.push(`${f.name}: alınmadı (fotoğraf en fazla ${ME.upload?.photo_mb || 12} MB)`);
         media.push(...r.media);
