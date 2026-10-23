@@ -393,7 +393,9 @@ const PAID_STATUSES = ['paid', 'shipped', 'delivered'];
 
 // Record that the money for an order arrived ("via" = 'stripe' or 'admin'). Only the first call
 // for an order changes anything ("AND paid_at IS NULL"), so whoever records the payment first —
-// Stripe's return page or the admin — is the one who sends the card confirmation e-mails, once.
+// Stripe's return page, the Stripe check or the admin — is the one who queues the card
+// confirmation e-mails, once. Call it inside inTransaction, so the payment and its queued e-mails
+// are saved together; then flushMails() sends them.
 // A pending order becomes "paid"; any other status (e.g. cancelled) is kept.
 // "at" is when the money was actually taken (from Stripe, see stripePaidAt); without it, now —
 // marked as estimated if the payment may have happened a while ago.
@@ -402,22 +404,85 @@ function recordPayment(orderId, via, { at = null, estimated = false } = {}) {
   const r = db.prepare(`UPDATE orders SET paid_at = COALESCE(?, datetime('now')), paid_at_estimated = ?, paid_via = ?,
       payment_unknown = 0, status = CASE status WHEN 'pending' THEN 'paid' ELSE status END
     WHERE id = ? AND paid_at IS NULL`).run(at, at ? 0 : estimated ? 1 : 0, via, orderId);
-  return r.changes ? db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId) : null;
+  if (!r.changes) return null;
+  const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+  // Card orders get their confirmation (to the customer) and new-order notice (to the shop) only
+  // once paid; other payment methods got them when the order was placed. If the order had been
+  // cancelled before the money arrived, both get a "paid, will not ship, refund due" message instead.
+  if (o.payment_method === 'card')
+    for (const kind of o.status === 'cancelled' ? ['charged_after_cancel', 'shop_charged_after_cancel'] : ['confirmation', 'shop_new_order'])
+      queueMail(o.id, kind);
+  return o;
 }
-// Card orders get their confirmation (to the customer) and new-order notice (to the shop) only
-// once paid; other payment methods got them when the order was placed. If the order had been
-// cancelled before the money arrived, both get a "paid, will not ship, refund due" message instead.
-// Called only by whoever recorded the payment (see recordPayment), so each goes out once.
-function cardPaymentMails(o, base) {
-  if (o.payment_method !== 'card') return;
-  const s = getSettings();
-  if (o.status === 'cancelled') {
-    mail.chargedAfterCancel(o, s);
-    mail.shopChargedAfterCancel(o, s, base);
-    return;
+
+// ---------- E-mails that must not be lost (table mail_outbox) ----------
+// Queued in the same transaction as the change they report, sent right after, retried on every
+// 15-minute run if the mail server fails (up to MAIL_TRIES times, then 'failed', shown on the order).
+// "still" = what must STILL be true of the order when the e-mail is sent; checked in the same
+// statement that claims the e-mail for sending, so an e-mail that has become untrue is dropped.
+const MAIL_KINDS = {
+  confirmation: { send: (o, s, base) => mail.orderConfirmation(o, s, base), still: "o.status <> 'cancelled'" },
+  shop_new_order: { send: (o, s, base) => mail.shopNewOrder(o, s, base), shop: true },
+  charged_after_cancel: { send: (o, s) => mail.chargedAfterCancel(o, s) },
+  shop_charged_after_cancel: { send: (o, s, base) => mail.shopChargedAfterCancel(o, s, base), shop: true },
+  // "payment not received, order cancelled": never once the order is reinstated or paid
+  expired: { send: (o, s) => mail.orderExpired(o, s), still: "o.status = 'cancelled' AND o.paid_at IS NULL" },
+};
+const MAIL_TRIES = 10;
+const MAIL_IN_FLIGHT = '-3 minutes';    // a send claimed longer ago than this has died (mail.js times out well before)
+
+// Queue an e-mail for an order (inside the caller's transaction). With e-mail switched off nothing
+// is queued: it would otherwise go out, out of date, once e-mail is set up. Only one per order and
+// kind; one that was dropped (the order changed back) is queued again.
+function queueMail(orderId, kind) {
+  if (!mail.enabled) return false;
+  db.prepare(`INSERT INTO mail_outbox (order_id, kind) VALUES (?, ?)
+    ON CONFLICT (order_id, kind) DO UPDATE SET state = 'due', tries = 0, claimed_at = NULL WHERE state = 'dropped'`).run(orderId, kind);
+  return true;
+}
+
+// The "payment not received" e-mail can't be taken back once it is on its way. Called (inside the
+// transaction) before an order is reinstated or a payment is recorded on it: drops that e-mail if it
+// hasn't left yet, and refuses (409) while it is being sent — try again a few seconds later.
+function dropExpiryMail(orderId) {
+  const busy = db.prepare(`SELECT 1 FROM mail_outbox WHERE order_id = ? AND kind = 'expired' AND state = 'sending'
+    AND claimed_at > datetime('now', ?)`).get(orderId, MAIL_IN_FLIGHT);
+  if (busy) throw Object.assign(new Error('Müşteriye "ödeme gelmedi" e-postası şu an gönderiliyor. Birkaç saniye sonra tekrar dene.'), { status: 409 });
+  db.prepare("UPDATE mail_outbox SET state = 'dropped' WHERE order_id = ? AND kind = 'expired' AND state IN ('due', 'sending')").run(orderId);
+}
+
+// Send what is queued. One sender at a time; e-mails queued while it runs get one more pass right
+// after. No database transaction is open while waiting for the mail server: each e-mail is first
+// claimed ('sending', one statement that also checks "still"), then sent, then marked.
+let mailRun = null, mailAgain = false;
+function flushMails() {
+  if (mailRun) { mailAgain = true; return mailRun; }
+  mailRun = (async () => {
+    do { mailAgain = false; await sendQueuedMails(); } while (mailAgain);
+  })().catch(e => console.error('Queued e-mails failed:', e.message)).finally(() => { mailRun = null; });
+  return mailRun;
+}
+async function sendQueuedMails() {
+  if (!mail.enabled) return;
+  // a send that never finished (the server stopped mid-send): try again — rarely, a duplicate
+  db.prepare("UPDATE mail_outbox SET state = 'due', claimed_at = NULL WHERE state = 'sending' AND claimed_at <= datetime('now', ?)").run(MAIL_IN_FLIGHT);
+  const s = getSettings(), base = PUBLIC_URL || `http://localhost:${PORT}`;
+  for (const m of db.prepare("SELECT id, kind FROM mail_outbox WHERE state = 'due' ORDER BY id LIMIT 50").all()) {
+    const k = MAIL_KINDS[m.kind];
+    if (!k) { db.prepare("UPDATE mail_outbox SET state = 'failed' WHERE id = ?").run(m.id); continue; }
+    const still = `EXISTS (SELECT 1 FROM orders o WHERE o.id = mail_outbox.order_id AND ${k.still || '1'})`;
+    if (!db.prepare(`UPDATE mail_outbox SET state = 'sending', claimed_at = datetime('now') WHERE id = ? AND state = 'due' AND ${still}`).run(m.id).changes) {
+      db.prepare(`UPDATE mail_outbox SET state = 'dropped' WHERE id = ? AND state = 'due' AND NOT ${still}`).run(m.id);
+      continue;
+    }
+    const o = db.prepare('SELECT * FROM orders WHERE id = (SELECT order_id FROM mail_outbox WHERE id = ?)').get(m.id);   // read after the claim
+    if (!(k.shop ? s.shop_email : o.email)) { db.prepare("UPDATE mail_outbox SET state = 'skipped' WHERE id = ?").run(m.id); continue; }
+    let ok = false;
+    try { ok = await k.send(o, s, base); } catch { ok = false; }
+    if (ok) db.prepare("UPDATE mail_outbox SET state = 'sent', sent_at = datetime('now') WHERE id = ? AND state = 'sending'").run(m.id);
+    else db.prepare(`UPDATE mail_outbox SET tries = tries + 1, claimed_at = NULL,
+        state = CASE WHEN tries + 1 >= ? THEN 'failed' ELSE 'due' END WHERE id = ? AND state = 'sending'`).run(MAIL_TRIES, m.id);
   }
-  mail.orderConfirmation(o, s, base);
-  mail.shopNewOrder(o, s, base);
 }
 
 // ---------- Unpaid orders: release them so their stock is not reserved forever ----------
@@ -429,48 +494,20 @@ const CARD_CHECK_AFTER_MINUTES = 120;   // ask Stripe about an unpaid card order
 const EXPIRY_BATCH = testNumber('EXPIRY_BATCH', 50);           // at most this many Stripe checks per run
 const EXPIRY_RUN_MS = 5 * 60 * 1000;    // a run starts no new Stripe check after 5 minutes; the rest wait for the next run
 const EXPIRY_REPLY_MS = testNumber('EXPIRY_REPLY_MS', 20000);  // the admin endpoint answers within this (Nginx gives up at 60 s)
-const EXPIRY_MAIL_TRIES = 10;           // a "payment not received" e-mail is retried on each run, then given up
 
 // Cancel an order only if it is STILL pending and unpaid, and give its stock back in the same
 // transaction. If the customer paid or the admin cancelled meanwhile, nothing changes, so stock
-// is never returned twice. With notify = true the customer e-mail is queued in the same transaction
-// (see flushExpiryMails). Returns true if this call cancelled it.
+// is never returned twice. With notify = true the customer's "payment not received" e-mail is
+// queued in the same transaction (see flushMails). Returns true if this call cancelled it.
 function autoCancel(orderId, reason, { notify = false } = {}) {
   return inTransaction(() => {
-    const r = db.prepare(`UPDATE orders SET status = 'cancelled', auto_cancelled_at = datetime('now'), auto_cancel_reason = ?,
-        expiry_mail = ?, expiry_mail_tries = 0
-      WHERE id = ? AND status = 'pending' AND paid_at IS NULL`).run(reason, notify ? 'due' : null, orderId);
-    if (r.changes) returnStock(JSON.parse(db.prepare('SELECT items FROM orders WHERE id = ?').get(orderId).items));
-    return r.changes === 1;
+    const r = db.prepare(`UPDATE orders SET status = 'cancelled', auto_cancelled_at = datetime('now'), auto_cancel_reason = ?
+      WHERE id = ? AND status = 'pending' AND paid_at IS NULL`).run(reason, orderId);
+    if (!r.changes) return false;
+    returnStock(JSON.parse(db.prepare('SELECT items FROM orders WHERE id = ?').get(orderId).items));
+    if (notify) queueMail(orderId, 'expired');
+    return true;
   });
-}
-
-// Send the queued "payment not received, order cancelled" e-mails. A failed one stays queued and is
-// tried again on the next run (every 15 minutes), up to EXPIRY_MAIL_TRIES times; then it is marked
-// 'failed' and the admin sees it on the order. Only for orders that are still cancelled: if the
-// admin un-cancelled it meanwhile, nothing is sent. One sender at a time, so nothing goes out twice;
-// e-mails queued while it runs are sent by one more pass right after.
-let mailRun = null, mailAgain = false;
-function flushExpiryMails() {
-  if (mailRun) { mailAgain = true; return mailRun; }
-  mailRun = (async () => {
-    do { mailAgain = false; await sendExpiryMails(); } while (mailAgain);
-  })().finally(() => { mailRun = null; });
-  return mailRun;
-}
-async function sendExpiryMails() {
-  if (!mail.enabled) return;          // stays queued until e-mail is set up
-  const s = getSettings();
-  const due = db.prepare("SELECT * FROM orders WHERE expiry_mail = 'due' AND status = 'cancelled' ORDER BY id LIMIT 20").all();
-  for (const o of due) {
-    if (await mail.orderExpired(o, s)) {
-      db.prepare("UPDATE orders SET expiry_mail = 'sent' WHERE id = ? AND expiry_mail = 'due'").run(o.id);
-    } else {
-      db.prepare(`UPDATE orders SET expiry_mail_tries = expiry_mail_tries + 1,
-          expiry_mail = CASE WHEN expiry_mail_tries + 1 >= ? THEN 'failed' ELSE 'due' END
-        WHERE id = ? AND expiry_mail = 'due'`).run(EXPIRY_MAIL_TRIES, o.id);
-    }
-  }
 }
 
 // Runs when the server starts, every 15 minutes, and on POST /api/admin/orders/expire-unpaid.
@@ -494,7 +531,7 @@ function expireUnpaidOrders() {
 }
 async function runExpiry() {
   const out = { overdue: [], cancelled: [], paid: [], skipped: [], left: 0 };
-  const base = PUBLIC_URL || `http://localhost:${PORT}`, deadline = Date.now() + EXPIRY_RUN_MS;
+  const deadline = Date.now() + EXPIRY_RUN_MS;
   db.prepare(`UPDATE orders SET overdue_at = datetime('now') WHERE status = 'pending' AND paid_at IS NULL AND overdue_at IS NULL
       AND payment_method IN ('bizum', 'transfer') AND created_at <= datetime('now', ?)`).run(`-${UNPAID_DAYS} days`);
   out.overdue = db.prepare(`SELECT ref FROM orders WHERE status = 'pending' AND paid_at IS NULL AND overdue_at IS NOT NULL
@@ -515,8 +552,8 @@ async function runExpiry() {
     if (!sess || sess.id !== o.stripe_session || sess.client_reference_id !== o.ref) { skip('Stripe answer does not match this order'); continue; }
     if (sess.payment_status === 'paid') {
       // without Stripe's payment time, "now" may be hours late: marked as estimated
-      const paid = recordPayment(o.id, 'stripe', { at: stripePaidAt(sess), estimated: true });
-      if (paid) { out.paid.push(o.ref); cardPaymentMails(paid, base); }
+      const paid = inTransaction(() => recordPayment(o.id, 'stripe', { at: stripePaidAt(sess), estimated: true }));
+      if (paid) out.paid.push(o.ref);       // its confirmation e-mails are queued (sent below, retried if they fail)
       continue;
     }
     if (sess.status === 'expired' && sess.payment_status === 'unpaid') {
@@ -526,7 +563,7 @@ async function runExpiry() {
     }
     skip(`Stripe: ${sess.status || 'unknown'} / ${sess.payment_status || 'unknown'}`);
   }
-  flushExpiryMails().catch(e => console.error('Expiry e-mails failed:', e.message));
+  flushMails();
   if (out.cancelled.length || out.paid.length || out.skipped.length || out.overdue.length)
     console.log(`Unpaid orders: cancelled ${out.cancelled.join(', ') || '-'} · paid ${out.paid.join(', ') || '-'} · left ${out.skipped.length + out.left} · overdue (admin to check) ${out.overdue.length}`);
   return out;
@@ -621,8 +658,7 @@ app.post('/api/orders/confirm', limit(30, 10 * 60 * 1000), async (req, res) => {
       if (sess.payment_status === 'paid') {
         // If the order was cancelled meanwhile it stays cancelled, but the payment is recorded
         // so the admin sees that a refund is due.
-        const paid = recordPayment(o.id, 'stripe', { at: stripePaidAt(sess) });
-        if (paid) cardPaymentMails(paid, baseUrl(req));
+        if (inTransaction(() => recordPayment(o.id, 'stripe', { at: stripePaidAt(sess) }))) flushMails();
       }
     }
     // "paid" (was the money received?) is separate from "status" (what happens to the order):
@@ -942,6 +978,7 @@ app.delete('/api/admin/products/:id', requireAdmin, (req, res) => {
 const REFUNDED = '(SELECT COALESCE(SUM(r.amount_cents), 0) FROM refunds r WHERE r.order_id = orders.id)';
 const NEEDS_REFUND = `(orders.status = 'cancelled' AND orders.paid_at IS NOT NULL AND ${REFUNDED} < orders.total_cents)`;
 const ORDER_COLS = `orders.*, (SELECT COUNT(*) FROM withdrawals w WHERE w.order_id = orders.id) AS withdrawals,
+  (SELECT json_group_array(json_object('kind', m.kind, 'state', m.state)) FROM mail_outbox m WHERE m.order_id = orders.id) AS mails,
   ${REFUNDED} AS refund_total_cents,
   ${NEEDS_REFUND} AS needs_refund,
   CASE WHEN ${NEEDS_REFUND} THEN orders.total_cents - ${REFUNDED} ELSE 0 END AS refund_due_cents,
@@ -1011,25 +1048,25 @@ app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
   let newlyPaid = null;
   try {
     inTransaction(() => {
+      // reinstating or paying: a "payment not received" e-mail that hasn't left yet must not go
+      if (status !== 'cancelled') dropExpiryMail(o.id);
       // Put stock back when an order is cancelled, take it again if un-cancelled (only if there is enough)
       if (status !== o.status && status === 'cancelled') returnStock(JSON.parse(o.items));
       if (status !== o.status && o.status === 'cancelled')
         takeStock(JSON.parse(o.items), (p, qty) => `Stok yetersiz: ${p.name_en} (stokta ${p.stock}, gereken ${qty})`);
       // un-cancelling an automatically cancelled order also clears the "auto-cancelled" note
-      // and any "payment not received" e-mail still waiting to be sent
       db.prepare(`UPDATE orders SET status = ?, tracking = ?,
           auto_cancelled_at = CASE WHEN ? = 'cancelled' THEN auto_cancelled_at END,
-          auto_cancel_reason = CASE WHEN ? = 'cancelled' THEN auto_cancel_reason END,
-          expiry_mail = CASE WHEN ? = 'cancelled' THEN expiry_mail END WHERE id = ?`)
-        .run(status, b.tracking !== undefined ? str(b.tracking, 200) : o.tracking, status, status, status, o.id);
+          auto_cancel_reason = CASE WHEN ? = 'cancelled' THEN auto_cancel_reason END WHERE id = ?`)
+        .run(status, b.tracking !== undefined ? str(b.tracking, 200) : o.tracking, status, status, o.id);
       if (undoManualPayment)
         db.prepare('UPDATE orders SET paid_at = NULL, paid_at_estimated = 0, paid_via = NULL WHERE id = ?').run(o.id);
       if (PAID_STATUSES.includes(status)) newlyPaid = recordPayment(o.id, 'admin');
     });
   } catch (e) {
-    return res.status(400).json({ error: e.message });
+    return res.status(e.status || 400).json({ error: e.message });
   }
-  if (newlyPaid) cardPaymentMails(newlyPaid, baseUrl(req));
+  if (newlyPaid) flushMails();
   // Tell the customer when the order is paid, shipped or cancelled
   let mailed = false;
   if (status !== o.status && b.notify !== false && ['paid', 'shipped', 'cancelled'].includes(status)) {
@@ -1067,8 +1104,41 @@ app.post('/api/admin/orders/:id/cancel-unpaid', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'Bu sipariş 5 günü geçmiş bir Bizum/havale siparişi değil' });
   if (!autoCancel(o.id, 'unpaid_5_days', { notify: true }))
     return res.status(409).json({ error: 'Sipariş artık ödeme bekliyor durumunda değil (ödendi ya da iptal edildi)' });
-  flushExpiryMails().catch(e => console.error('Expiry e-mails failed:', e.message));
+  flushMails();
   res.json({ ok: true, mail: mail.enabled });
+});
+
+// A Bizum/transfer (or "contact") payment that arrived AFTER the order was cancelled — e.g. the
+// customer paid on day 6 and the returned stock has been sold since. The payment is recorded on the
+// day the money arrived (paid_on, Madrid date; default today), the order STAYS cancelled and no
+// stock is taken. The order then shows "refund due" and the refund is added as usual (İade ekle).
+// Finance: income on paid_on, refund when it is made. Recorded once only; needs { confirm: true }.
+app.post('/api/admin/orders/:id/late-payment', requireAdmin, (req, res) => {
+  const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
+  if (!o) return res.status(404).json({ error: 'Not found' });
+  const b = req.body || {};
+  if (b.confirm !== true) return res.status(400).json({ error: 'Onay gerekli' });
+  if (!['bizum', 'transfer', 'contact'].includes(o.payment_method))
+    return res.status(400).json({ error: 'Kart ödemeleri Stripe üzerinden kaydedilir' });
+  if (o.payment_unknown) return res.status(400).json({ error: 'Bu eski sipariş için "ödenmiş miydi?" sorusunu cevapla' });
+  const today = finance.localDate();
+  const paidOn = b.paid_on === undefined || b.paid_on === '' ? today : finance.parseDate(b.paid_on);
+  if (!paidOn) return res.status(400).json({ error: 'Geçersiz ödeme tarihi (ör. 2026-10-23)' });
+  if (paidOn > today) return res.status(400).json({ error: 'Ödeme tarihi gelecekte olamaz' });
+  if (paidOn < finance.utcTextToLocalDate(o.created_at)) return res.status(400).json({ error: 'Ödeme tarihi sipariş tarihinden önce olamaz' });
+  let recorded;
+  try {
+    recorded = inTransaction(() => {
+      dropExpiryMail(o.id);           // the money arrived: "payment not received" must not go out now
+      return db.prepare(`UPDATE orders SET paid_at = ?, paid_at_estimated = 0, paid_via = 'late',
+          late_payment_recorded_at = datetime('now') WHERE id = ? AND status = 'cancelled' AND paid_at IS NULL`)
+        .run(finance.localDayStartUtc(paidOn), o.id).changes === 1;
+    });
+  } catch (e) {
+    return res.status(e.status || 400).json({ error: e.message });
+  }
+  if (!recorded) return res.status(409).json({ error: 'Bu sipariş iptal değil ya da ödemesi zaten kayıtlı' });
+  res.json({ ok: true, order: db.prepare(`SELECT ${ORDER_COLS} FROM orders WHERE id = ?`).get(o.id) });
 });
 
 // Add a refund (money actually given back). Refunds are only added, never edited, so the dated
@@ -1234,7 +1304,10 @@ const server = app.listen(PORT, HOST, () => {
   // is running on the same data) must not log out that instance's admins.
   revokeAdminSessions();
   console.log(`Vornetic → http://localhost:${PORT}   Admin → http://localhost:${PORT}/admin`);
-  // Release unpaid orders now and every 15 minutes (see expireUnpaidOrders)
+  // Nothing can be mid-send in a server that just started: e-mails left 'sending' by a stopped one
+  // are sent again (rarely a duplicate, never lost)
+  db.prepare("UPDATE mail_outbox SET state = 'due', claimed_at = NULL WHERE state = 'sending'").run();
+  // Release unpaid orders now and every 15 minutes (see expireUnpaidOrders); it also sends queued e-mails
   const expire = () => expireUnpaidOrders().catch(e => console.error('Unpaid order check failed:', e.message));
   expire();
   setInterval(expire, 15 * 60 * 1000).unref();

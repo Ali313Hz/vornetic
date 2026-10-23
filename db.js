@@ -146,9 +146,9 @@ for (const sql of [
   'ALTER TABLE orders ADD COLUMN overdue_at TEXT',
   // Last time an unpaid card order was checked with Stripe (the check goes oldest-checked first)
   'ALTER TABLE orders ADD COLUMN stripe_checked_at TEXT',
-  // "Payment not received, order cancelled" e-mail: 'due' (to send / retry), 'sent', or 'failed' (gave up)
-  'ALTER TABLE orders ADD COLUMN expiry_mail TEXT',
-  'ALTER TABLE orders ADD COLUMN expiry_mail_tries INTEGER NOT NULL DEFAULT 0',
+  // A Bizum/transfer payment that arrived after the order was cancelled: when the admin recorded it
+  // (paid_at = the day the money arrived; the order stays cancelled and a refund is due)
+  'ALTER TABLE orders ADD COLUMN late_payment_recorded_at TEXT',
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 
 // Payment date. Runs once, when the column is added. Orders already paid/shipped/delivered get
@@ -174,6 +174,23 @@ CREATE TABLE IF NOT EXISTS refunds (
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_refunds_order ON refunds(order_id);
+
+-- E-mails about an order that must not be lost (card payment confirmations, "payment not
+-- received"). Queued in the same transaction as the change they report, sent right after and
+-- retried if the mail server fails. state: due → sending → sent | failed (gave up) | dropped
+-- (no longer true, e.g. the order was reinstated) | skipped (no address). One per order and kind.
+CREATE TABLE IF NOT EXISTS mail_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'due',
+  tries INTEGER NOT NULL DEFAULT 0,
+  claimed_at TEXT,
+  sent_at TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE (order_id, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_mail_outbox_state ON mail_outbox(state);
 
 -- The admin's answers to "was this old cancelled order paid?" ('paid' | 'unpaid'), each with
 -- its date. Rows are only added: a corrected answer is a new row, so every decision stays visible.

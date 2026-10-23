@@ -11,6 +11,8 @@ const transporter = enabled ? nodemailer.createTransport({
   port: Number(process.env.SMTP_PORT) || 587,
   secure: Number(process.env.SMTP_PORT) === 465,
   auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+  // a hanging mail server counts as a failure (retried later), well within server.js MAIL_IN_FLIGHT
+  connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 30000,
 }) : null;
 const FROM = process.env.MAIL_FROM || process.env.SMTP_USER || '';
 

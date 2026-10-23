@@ -35,6 +35,10 @@ async function shop({ stripeOn = true, dataDir, env = {} } = {}) {
       return r.body.ref;
     },
     get: ref => one('SELECT * FROM orders WHERE ref = ?', ref),
+    // the queued e-mail of this kind for the order (mail_outbox row), or undefined
+    mail: (ref, kind) => one('SELECT m.* FROM mail_outbox m JOIN orders o ON o.id = m.order_id WHERE o.ref = ? AND m.kind = ?', ref, kind),
+    // admin view of the order (with needs_refund, refund_due_cents, mails…)
+    view: ref => srv.orderByRef(ref),
     age: (ref, sqliteOffset) => sql(`UPDATE orders SET created_at = datetime('now', ?) WHERE ref = ?`, sqliteOffset, ref),
     expire: async () => { const r = await srv.admin('POST', EXPIRE); assert.strictEqual(r.status, 200, JSON.stringify(r.body)); return r.body; },
     // the owner checked the bank/Bizum: not paid → cancel
@@ -46,6 +50,11 @@ async function shop({ stripeOn = true, dataDir, env = {} } = {}) {
   return ctx;
 }
 // wait until the e-mails sent in the background when orders were placed have all arrived
+// change an order the way the admin does: a 409 ("that order's e-mail is being sent right now")
+// means try again a moment later
+async function setOrderSoon(s, ref, changes) {
+  for (let i = 0; ; i++) { const r = await s.srv.setOrder(ref, changes); if (r.status !== 409 || i >= 40) return r; await sleep(100); }
+}
 async function settled(s) { let n; do { n = s.smtp.messages.length; await sleep(400); } while (s.smtp.messages.length !== n); return n; }
 
 // ---------- Bizum / bank transfer: after 5 days the OWNER decides (Codex P1: reconcile first) ----------
@@ -66,7 +75,7 @@ test('Bizum/transfer unpaid after 5 days: flagged for the owner, never cancelled
     assert.strictEqual(s.stock(), 10 - 6, 'no stock released without the owner');
     for (const ref of [bizum, transfer]) {
       const o = s.get(ref);
-      assert.deepStrictEqual([o.status, o.auto_cancel_reason, o.paid_at, o.expiry_mail], ['pending', null, null, null]);
+      assert.deepStrictEqual([o.status, o.auto_cancel_reason, o.paid_at, s.mail(ref, 'expired')], ['pending', null, null, undefined]);
       assert.match(o.overdue_at, /^\d{4}-\d{2}-\d{2} /);
     }
     assert.strictEqual(s.get(young).overdue_at, null);
@@ -96,7 +105,7 @@ test('owner confirms "not paid": cancelled, stock returned once, customer e-mail
     assert.strictEqual(s.stock(), 10 - 2, 'stock of the cancelled order returned once');
     const o = s.get(due);
     assert.deepStrictEqual([o.status, o.auto_cancel_reason, o.paid_at], ['cancelled', 'unpaid_5_days', null]);
-    assert.ok(await until(() => s.get(due).expiry_mail === 'sent'));
+    assert.ok(await until(() => s.mail(due, 'expired')?.state === 'sent'));
     await sleep(300);
     assert.strictEqual(s.smtp.messages.length, before + 1, 'one e-mail');
     const t = s.smtp.text(before);
@@ -136,7 +145,8 @@ test('admin can still un-cancel (customer paid late): note cleared, stock taken 
     await s.expire();
     assert.strictEqual((await s.cancelUnpaid(ref)).status, 200);
     assert.strictEqual(s.stock(), 10);
-    assert.strictEqual((await s.srv.setOrder(ref, { status: 'paid' })).status, 200);
+    assert.ok(await until(() => s.mail(ref, 'expired').state === 'sent'));   // (while it is being sent, reinstating waits: see the race test)
+    assert.strictEqual((await setOrderSoon(s, ref, { status: 'paid' })).status, 200);
     const o = s.get(ref);
     assert.deepStrictEqual([o.status, o.auto_cancel_reason, o.auto_cancelled_at], ['paid', null, null]);
     assert.ok(o.paid_at);
@@ -155,30 +165,203 @@ test('a failed cancellation e-mail is kept and sent on a later run; un-cancel st
     const before = await settled(s);
     s.smtp.ctl.reject = /buyer@example\.test/;                         // the mail server refuses for now
     for (const ref of [a, b]) assert.strictEqual((await s.cancelUnpaid(ref)).status, 200);
-    assert.ok(await until(() => s.get(a).expiry_mail_tries >= 1 && s.get(b).expiry_mail_tries >= 1), 'both tried once');
-    assert.deepStrictEqual([s.get(a).expiry_mail, s.get(b).expiry_mail], ['due', 'due'], 'kept for a retry');
+    assert.ok(await until(() => s.mail(a, 'expired').tries >= 1 && s.mail(b, 'expired').tries >= 1), 'both tried once');
+    assert.deepStrictEqual([s.mail(a, 'expired').state, s.mail(b, 'expired').state], ['due', 'due'], 'kept for a retry');
     assert.strictEqual(s.smtp.messages.length, before);
 
-    await s.srv.setOrder(b, { status: 'pending' });                    // owner un-cancels b: its e-mail must not go
-    assert.strictEqual(s.get(b).expiry_mail, null);
+    assert.strictEqual((await setOrderSoon(s, b, { status: 'pending' })).status, 200);   // owner reinstates b: its e-mail must not go
+    assert.strictEqual(s.mail(b, 'expired').state, 'dropped');
     s.smtp.ctl.reject = null;                                           // mail server is back
     await s.expire();                                                   // the 15-minute run retries
-    assert.ok(await until(() => s.get(a).expiry_mail === 'sent'));
+    assert.ok(await until(() => s.mail(a, 'expired').state === 'sent'));
     await sleep(300);
     assert.strictEqual(s.smtp.messages.length, before + 1, 'only a, once');
+    assert.strictEqual(s.mail(b, 'expired').state, 'dropped');
 
     s.smtp.ctl.reject = /buyer@example\.test/;
     assert.strictEqual((await s.cancelUnpaid(c)).status, 200);
-    assert.ok(await until(() => s.get(c).expiry_mail_tries >= 1));
-    s.sql("UPDATE orders SET expiry_mail_tries = 9 WHERE ref = ?", c);  // as if it failed 9 times already
+    assert.ok(await until(() => s.mail(c, 'expired').tries >= 1));
+    s.sql('UPDATE mail_outbox SET tries = 9 WHERE id = ?', s.mail(c, 'expired').id);   // as if it failed 9 times already
     await s.expire();
-    assert.ok(await until(() => s.get(c).expiry_mail === 'failed'), 'gives up and shows it to the admin');
+    assert.ok(await until(() => s.mail(c, 'expired').state === 'failed'), 'gives up');
+    assert.match(JSON.stringify((await s.view(c)).mails), /failed/, 'the admin sees it on the order');
     s.smtp.ctl.reject = null;
     await s.expire();
     await sleep(300);
-    assert.strictEqual(s.get(c).expiry_mail, 'failed');
+    assert.strictEqual(s.mail(c, 'expired').state, 'failed');
     assert.strictEqual(s.smtp.messages.length, before + 1, 'not retried forever');
   } finally { await s.close(); }
+});
+
+// ---------- No misleading "cancelled" e-mail during concurrent changes (Codex P2) ----------
+test('race: an order reinstated while another cancellation e-mail is in flight never gets its e-mail; the in-flight one blocks reinstating', async () => {
+  const s = await shop();
+  try {
+    const a = await s.order('bizum', 1), b = await s.order('transfer', 2);
+    for (const ref of [a, b]) s.age(ref, '-6 days');
+    await s.expire();
+    const before = await settled(s);
+    s.smtp.ctl.delayMs = 1500;                                          // the mail server is slow: a's e-mail stays in flight
+    assert.strictEqual((await s.cancelUnpaid(a)).status, 200);
+    assert.strictEqual((await s.cancelUnpaid(b)).status, 200);          // queued while a's send is running
+    assert.ok(await until(() => s.smtp.ctl.inFlight === 1), 'a is being sent');
+    assert.strictEqual(s.mail(a, 'expired').state, 'sending');
+    assert.strictEqual(s.mail(b, 'expired').state, 'due');
+
+    // b is not on its way yet: reinstating it drops its e-mail for good
+    assert.strictEqual((await s.srv.setOrder(b, { status: 'pending' })).status, 200);
+    // a is on its way: it can't be unsent, so reinstating or recording a payment must wait
+    const blocked = await s.srv.setOrder(a, { status: 'paid' });
+    assert.strictEqual(blocked.status, 409, JSON.stringify(blocked.body));
+    assert.match(blocked.body.error, /gönderiliyor/);
+    assert.strictEqual((await s.srv.admin('POST', `/api/admin/orders/${s.get(a).id}/late-payment`, { confirm: true })).status, 409);
+    assert.deepStrictEqual([s.get(a).status, s.get(a).paid_at], ['cancelled', null], 'nothing changed under the e-mail');
+
+    assert.ok(await until(() => s.mail(a, 'expired').state === 'sent'));
+    await sleep(500);
+    assert.strictEqual(s.smtp.messages.length, before + 1, 'only a was told');
+    assert.strictEqual(s.mail(b, 'expired').state, 'dropped');
+    assert.deepStrictEqual([s.get(b).status, s.stock()], ['pending', 10 - 2], 'b reinstated with its stock');
+    s.smtp.ctl.delayMs = 0;
+    assert.strictEqual((await s.srv.setOrder(a, { status: 'paid' })).status, 200, 'after the send the admin can go on');
+  } finally { await s.close(); }
+});
+
+// ---------- A payment that arrives after the cancellation (Codex P1) ----------
+test('late Bizum payment after cancellation: recorded, order stays cancelled, no stock taken, refund due, in Finance', async () => {
+  const s = await shop();
+  try {
+    const late = await s.order('bizum', 3);
+    s.age(late, '-6 days');
+    await s.expire();
+    s.smtp.ctl.reject = /buyer@example\.test/;                         // its "payment not received" e-mail hasn't gone yet
+    assert.strictEqual((await s.cancelUnpaid(late)).status, 200);
+    assert.strictEqual(s.stock(), 10);
+    // its first send attempt has failed and it waits for a retry (while a send is in flight, the
+    // order can't be changed: see the race test)
+    assert.ok(await until(() => s.mail(late, 'expired').tries >= 1 && s.mail(late, 'expired').state === 'due'));
+    await s.order('transfer', 10);                                      // the returned stock is sold to someone else
+    assert.strictEqual(s.stock(), 0);
+    const id = s.get(late).id, LATE = `/api/admin/orders/${id}/late-payment`;
+    const total = s.get(late).total_cents;
+
+    // the only old way — "paid" — needs the stock back, and there is none
+    const paidTry = await s.srv.setOrder(late, { status: 'paid' });
+    assert.strictEqual(paidTry.status, 400);
+    assert.match(paidTry.body.error, /Stok yetersiz/);
+    assert.deepStrictEqual([s.get(late).status, s.get(late).paid_at, s.stock()], ['cancelled', null, 0]);
+    // and a refund needs a recorded payment
+    assert.strictEqual((await s.srv.refund(late, total)).status, 400);
+
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Madrid' });
+    const future = new Date(Date.now() + 3 * 86400e3).toLocaleDateString('sv-SE', { timeZone: 'Europe/Madrid' });
+    assert.strictEqual((await s.srv.admin('POST', LATE, { paid_on: today })).status, 400, 'needs confirmation');
+    assert.strictEqual((await s.srv.admin('POST', LATE, { confirm: true, paid_on: future })).status, 400, 'not in the future');
+    assert.strictEqual((await s.srv.admin('POST', LATE, { confirm: true, paid_on: '2020-01-01' })).status, 400, 'not before the order');
+    assert.strictEqual((await s.srv.admin('POST', LATE, { confirm: true, paid_on: '31/02/2026' })).status, 400, 'a real date');
+
+    // recorded once, even with a double click
+    const [r1, r2] = await Promise.all([s.srv.admin('POST', LATE, { confirm: true, paid_on: today }), s.srv.admin('POST', LATE, { confirm: true, paid_on: today })]);
+    assert.deepStrictEqual([r1.status, r2.status].sort(), [200, 409]);
+    assert.strictEqual((await s.srv.admin('POST', LATE, { confirm: true })).status, 409, 'never twice');
+    const o = s.get(late);
+    assert.deepStrictEqual([o.status, o.paid_via, o.paid_at_estimated, o.auto_cancel_reason], ['cancelled', 'late', 0, 'unpaid_5_days']);
+    assert.ok(o.paid_at && o.late_payment_recorded_at, 'both dates stored');
+    assert.strictEqual(s.stock(), 0, 'no stock taken');
+    assert.strictEqual(s.mail(late, 'expired').state, 'dropped', '"payment not received" must not go out now');
+    const v = await s.view(late);
+    assert.deepStrictEqual([v.needs_refund, v.refund_due_cents], [1, total], 'refund due');
+
+    // Finance: income when the money arrived, refund when it is given back
+    const fin = async () => (await s.srv.admin('GET', '/api/admin/finance')).body.web;
+    assert.strictEqual((await fin()).payments_cents, total);
+    assert.strictEqual((await s.srv.refund(late, total)).status, 200);
+    const after = await fin();
+    assert.deepStrictEqual([after.payments_cents, after.refunds_cents], [total, total]);
+    assert.strictEqual((await s.view(late)).needs_refund, 0);
+    // a late-paid order can't be put back to "pending" (the payment stays on record)
+    assert.strictEqual((await s.srv.setOrder(late, { status: 'pending' })).status, 400);
+    s.smtp.ctl.reject = null;
+    await s.expire();
+    await sleep(300);
+    assert.strictEqual(s.mail(late, 'expired').state, 'dropped');
+  } finally { await s.close(); }
+});
+
+test('late payment: dated on the day the money arrived (Madrid), only for cancelled Bizum/transfer orders', async () => {
+  const s = await shop();
+  try {
+    const jan = await s.order('transfer', 1), open = await s.order('bizum', 1), card = await s.order('card', 1);
+    await s.srv.setOrder(jan, { status: 'cancelled' });
+    s.sql("UPDATE orders SET created_at = '2026-01-20 10:00:00' WHERE ref = ?", jan);
+    const late = id => s.srv.admin('POST', `/api/admin/orders/${id}/late-payment`, { confirm: true, paid_on: '31/01/2026' });
+    assert.strictEqual((await late(s.get(jan).id)).status, 200);
+    assert.strictEqual(s.get(jan).paid_at, '2026-01-30 23:00:00', '31 January 00:00 in Madrid');
+    const fin = async m => (await s.srv.admin('GET', '/api/admin/finance?month=' + m)).body.web.payments_cents;
+    assert.strictEqual(await fin('2026-01'), s.get(jan).total_cents);
+    assert.strictEqual(await fin('2026-02'), 0);
+
+    s.sql("UPDATE orders SET created_at = '2026-01-20 10:00:00' WHERE ref IN (?, ?)", open, card);
+    assert.strictEqual((await late(s.get(open).id)).status, 409, 'not cancelled: use "Ödeme geldi"');
+    s.sql("UPDATE orders SET status = 'cancelled' WHERE ref = ?", card);
+    assert.strictEqual((await late(s.get(card).id)).status, 400, 'card payments come from Stripe');
+    assert.strictEqual((await s.srv.call('POST', `/api/admin/orders/${s.get(jan).id}/late-payment`, { confirm: true })).status, 401, 'admin only');
+  } finally { await s.close(); }
+});
+
+// ---------- Card payment e-mails are kept and retried (Codex P2) ----------
+test('card: payment found by the check while the mail server fails → payment kept, e-mails retried once each', async () => {
+  const s = await shop();
+  try {
+    const found = await s.order('card', 2), back = await s.order('card', 1);
+    s.age(found, '-3 hours');
+    Object.assign(s.sessionOf(found), { status: 'complete', payment_status: 'paid' });
+    Object.assign(s.sessionOf(back), { status: 'complete', payment_status: 'paid' });
+    const before = await settled(s);
+    s.smtp.ctl.reject = /./;                                            // mail server refuses everything
+    const r = await s.expire();
+    assert.deepStrictEqual(r.paid, [found]);
+    const c = await s.srv.call('POST', '/api/orders/confirm', { ref: back, session_id: s.get(back).stripe_session });
+    assert.strictEqual(c.body.paid, true, 'the customer returning from Stripe is unaffected');
+    for (const ref of [found, back]) {
+      assert.ok(await until(() => s.mail(ref, 'confirmation')?.tries >= 1 && s.mail(ref, 'shop_new_order')?.tries >= 1), ref);
+      assert.deepStrictEqual([s.mail(ref, 'confirmation').state, s.mail(ref, 'shop_new_order').state], ['due', 'due']);
+      assert.deepStrictEqual([s.get(ref).status, s.get(ref).paid_via], ['paid', 'stripe'], 'payment kept');
+    }
+    assert.strictEqual(s.smtp.messages.length, before);
+
+    s.smtp.ctl.reject = null;                                           // mail server back
+    await s.expire();
+    assert.ok(await until(() => [found, back].every(ref => s.mail(ref, 'confirmation').state === 'sent' && s.mail(ref, 'shop_new_order').state === 'sent')));
+    await sleep(300);
+    assert.strictEqual(s.smtp.messages.length, before + 4, 'customer + shop, for each order, once');
+    const sent = s.smtp.messages.slice(before).map((m, i) => s.smtp.text(before + i));
+    assert.strictEqual(sent.filter(t => /^To: shop@example\.test\r?$/m.test(t)).length, 2);
+    await s.expire();
+    await sleep(300);
+    assert.strictEqual(s.smtp.messages.length, before + 4, 'no second set');
+  } finally { await s.close(); }
+});
+
+test('an e-mail left "sending" by a stopped server is sent after the restart', async () => {
+  const dir = tempDir();
+  try {
+    let s = await shop({ dataDir: dir });
+    const ref = await s.order('card');
+    s.age(ref, '-3 hours');
+    Object.assign(s.sessionOf(ref), { status: 'complete', payment_status: 'paid' });
+    s.smtp.ctl.reject = /./;
+    await s.expire();
+    assert.ok(await until(() => s.mail(ref, 'confirmation')?.tries >= 1 && s.mail(ref, 'shop_new_order')?.tries >= 1));
+    await s.close();
+    const d = new DatabaseSync(path.join(dir, 'store.db'));
+    d.prepare("UPDATE mail_outbox SET state = 'sending', claimed_at = datetime('now')").run();   // as if stopped mid-send
+    d.close();
+    s = await shop({ dataDir: dir });
+    try {
+      assert.ok(await until(() => s.mail(ref, 'confirmation').state === 'sent' && s.mail(ref, 'shop_new_order').state === 'sent'));
+    } finally { await s.close(); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ---------- Card: always ask Stripe first ----------
@@ -251,7 +434,7 @@ test('card: page expired unpaid → cancelled and stock returned, without e-mail
     const before = s.smtp.messages.length;
     const r = await s.expire();
     assert.deepStrictEqual(r.cancelled, [ref]);
-    assert.deepStrictEqual([s.get(ref).status, s.get(ref).auto_cancel_reason, s.get(ref).paid_at, s.get(ref).expiry_mail], ['cancelled', 'card_checkout_expired', null, null]);
+    assert.deepStrictEqual([s.get(ref).status, s.get(ref).auto_cancel_reason, s.get(ref).paid_at, s.mail(ref, 'expired')], ['cancelled', 'card_checkout_expired', null, undefined]);
     assert.strictEqual(s.stock(), 10);
     await sleep(400);
     assert.strictEqual(s.smtp.messages.length, before, 'customer never finished paying: no e-mail');

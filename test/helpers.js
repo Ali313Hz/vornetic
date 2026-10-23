@@ -117,8 +117,9 @@ function oldDatabase(dir, orders) {
 // Fake SMTP server on 127.0.0.1 that accepts everything and keeps the messages.
 // env: the SMTP_* settings to give startServer. text(i): message i, quoted-printable decoded.
 // ctl.reject = /regex/ makes it refuse recipients whose RCPT TO line matches, like a failing mail server.
+// ctl.delayMs keeps each message "in flight" that long before accepting it (ctl.inFlight counts them).
 async function fakeSmtp() {
-  const messages = [], sockets = new Set(), ctl = { reject: null };
+  const messages = [], sockets = new Set(), ctl = { reject: null, delayMs: 0, inFlight: 0 };
   const server = net.createServer(sock => {
     sockets.add(sock);
     sock.on('close', () => sockets.delete(sock));
@@ -128,7 +129,12 @@ async function fakeSmtp() {
       buf += d;
       let i;
       while ((i = buf.indexOf(inData ? '\r\n.\r\n' : '\r\n')) !== -1) {
-        if (inData) { messages.push(buf.slice(0, i)); buf = buf.slice(i + 5); inData = false; sock.write('250 queued\r\n'); continue; }
+        if (inData) {
+          const msg = buf.slice(0, i); buf = buf.slice(i + 5); inData = false;
+          const accept = () => { messages.push(msg); sock.write('250 queued\r\n'); };
+          if (ctl.delayMs) { ctl.inFlight++; setTimeout(() => { ctl.inFlight--; accept(); }, ctl.delayMs); } else accept();
+          continue;
+        }
         const line = buf.slice(0, i); buf = buf.slice(i + 2);
         if (/^RCPT TO/i.test(line) && ctl.reject && ctl.reject.test(line)) { rejected = true; sock.write('550 fake rejection\r\n'); continue; }
         if (/^DATA/i.test(line) && rejected) { rejected = false; sock.write('554 no valid recipients\r\n'); continue; }
