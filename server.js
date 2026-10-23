@@ -338,10 +338,17 @@ function recordPayment(orderId, via) {
   return r.changes ? db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId) : null;
 }
 // Card orders get their confirmation (to the customer) and new-order notice (to the shop) only
-// once paid; other payment methods got them when the order was placed.
+// once paid; other payment methods got them when the order was placed. If the order had been
+// cancelled before the money arrived, both get a "paid, will not ship, refund due" message instead.
+// Called only by whoever recorded the payment (see recordPayment), so each goes out once.
 function cardPaymentMails(o, base) {
-  if (o.payment_method !== 'card' || o.status === 'cancelled') return;
+  if (o.payment_method !== 'card') return;
   const s = getSettings();
+  if (o.status === 'cancelled') {
+    mail.chargedAfterCancel(o, s);
+    mail.shopChargedAfterCancel(o, s, base);
+    return;
+  }
   mail.orderConfirmation(o, s, base);
   mail.shopNewOrder(o, s, base);
 }
@@ -430,7 +437,6 @@ app.post('/api/orders/confirm', limit(30, 10 * 60 * 1000), async (req, res) => {
   const o = db.prepare('SELECT * FROM orders WHERE ref = ? AND stripe_session = ?').get(str(ref, 20), str(session_id, 200));
   if (!o) return res.status(404).json({ error: 'Order not found' });
   try {
-    let status = o.status;
     if (!o.paid_at) {
       const sess = await stripe('GET', `/v1/checkout/sessions/${encodeURIComponent(o.stripe_session)}`);
       if (sess.payment_status === 'paid') {
@@ -439,9 +445,11 @@ app.post('/api/orders/confirm', limit(30, 10 * 60 * 1000), async (req, res) => {
         const paid = recordPayment(o.id, 'stripe');
         if (paid) cardPaymentMails(paid, baseUrl(req));
       }
-      status = db.prepare('SELECT status FROM orders WHERE id = ?').get(o.id).status;
     }
-    res.json({ ok: true, ref: o.ref, status, total_cents: o.total_cents, payment_method: 'card' });
+    // "paid" (was the money received?) is separate from "status" (what happens to the order):
+    // a cancelled order can still have been charged, and the return page must say so.
+    const now = db.prepare('SELECT status, paid_at FROM orders WHERE id = ?').get(o.id);
+    res.json({ ok: true, ref: o.ref, status: now.status, paid: !!now.paid_at, total_cents: o.total_cents, payment_method: 'card' });
   } catch (e) {
     res.status(502).json({ error: 'Could not verify payment' });
   }
@@ -733,7 +741,9 @@ const ORDER_COLS = `orders.*, (SELECT COUNT(*) FROM withdrawals w WHERE w.order_
   ${NEEDS_REFUND} AS needs_refund,
   CASE WHEN ${NEEDS_REFUND} THEN orders.total_cents - ${REFUNDED} ELSE 0 END AS refund_due_cents,
   (SELECT json_group_array(json_object('amount_cents', r.amount_cents, 'note', r.note, 'created_at', r.created_at))
-     FROM (SELECT * FROM refunds WHERE order_id = orders.id ORDER BY id) r) AS refunds`;
+     FROM (SELECT * FROM refunds WHERE order_id = orders.id ORDER BY id) r) AS refunds,
+  (SELECT json_group_array(json_object('answer', c.answer, 'created_at', c.created_at))
+     FROM (SELECT * FROM payment_checks WHERE order_id = orders.id ORDER BY id) c) AS payment_checks`;
 app.get('/api/admin/orders', requireAdmin, (req, res) => {
   const st = req.query.status;
   const rows = STATUSES.includes(st)
@@ -741,10 +751,41 @@ app.get('/api/admin/orders', requireAdmin, (req, res) => {
     : db.prepare(`SELECT ${ORDER_COLS} FROM orders ORDER BY id DESC LIMIT 500`).all();
   res.json(rows);
 });
+// "Was this old cancelled order paid?" (orders flagged payment_unknown by the migration).
+// Every answer is saved with its date in payment_checks. A wrong answer can be corrected
+// (confirm_correction: true); the correction is a new row, so the history shows both.
+// - 'paid' records a payment on the order date (estimated), paid_via = 'check'
+// - correcting to 'unpaid' removes only that 'check' payment, and only if nothing was refunded
+//   (refunds are permanent); real payments (Stripe, admin, legacy) are never touched here
+function answerPaymentCheck(o, b, res) {
+  const answer = b.payment_check;
+  const fail = msg => res.status(400).json({ error: msg });
+  if (!['paid', 'unpaid'].includes(answer)) return fail('Geçersiz ödeme kontrolü');
+  const last = db.prepare('SELECT answer FROM payment_checks WHERE order_id = ? ORDER BY id DESC LIMIT 1').get(o.id);
+  if (!last && !o.payment_unknown) return fail('Bu siparişte ödeme kontrolü yok');
+  if (last && b.confirm_correction !== true) return fail('Önceki cevabı değiştirmek için onay gerekli');
+  if (last && last.answer === answer) return fail('Cevap zaten bu');
+  if (answer === 'unpaid' && o.paid_at) {
+    if (o.paid_via !== 'check') return fail('Bu ödeme kontrolden gelmiyor; buradan silinemez');
+    const refunded = db.prepare('SELECT COALESCE(SUM(amount_cents), 0) s FROM refunds WHERE order_id = ?').get(o.id).s;
+    if (refunded > 0) return fail('Bu siparişte iade kaydı var; "ödenmemişti" yapılamaz');
+  }
+  inTransaction(() => {
+    db.prepare('INSERT INTO payment_checks (order_id, answer) VALUES (?, ?)').run(o.id, answer);
+    db.prepare('UPDATE orders SET payment_unknown = 0 WHERE id = ?').run(o.id);
+    if (answer === 'paid' && !o.paid_at)        // real day unknown: use the order date, marked as estimated
+      db.prepare("UPDATE orders SET paid_at = created_at, paid_at_estimated = 1, paid_via = 'check' WHERE id = ?").run(o.id);
+    if (answer === 'unpaid' && o.paid_at)
+      db.prepare('UPDATE orders SET paid_at = NULL, paid_at_estimated = 0, paid_via = NULL WHERE id = ?').run(o.id);
+  });
+  res.json({ ok: true, mailed: false });
+}
+
 app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
   const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!o) return res.status(404).json({ error: 'Not found' });
   const b = req.body || {};
+  if (b.payment_check !== undefined) return answerPaymentCheck(o, b, res);
   const status = STATUSES.includes(b.status) ? b.status : o.status;
 
   // Refunds are separate, dated records (POST .../refunds); saving the order never changes them
@@ -762,11 +803,6 @@ app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
     undoManualPayment = true;
   }
 
-  // Old cancelled orders whose payment is unknown: the admin answers "was it paid?"
-  const check = b.payment_check;
-  if (check !== undefined && (!o.payment_unknown || !['paid', 'unpaid'].includes(check)))
-    return res.status(400).json({ error: 'Geçersiz ödeme kontrolü' });
-
   let newlyPaid = null;
   try {
     inTransaction(() => {
@@ -778,9 +814,6 @@ app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
         .run(status, b.tracking !== undefined ? str(b.tracking, 200) : o.tracking, o.id);
       if (undoManualPayment)
         db.prepare('UPDATE orders SET paid_at = NULL, paid_at_estimated = 0, paid_via = NULL WHERE id = ?').run(o.id);
-      if (check === 'paid')     // real day unknown: use the order date, marked as estimated
-        db.prepare("UPDATE orders SET paid_at = created_at, paid_at_estimated = 1, paid_via = 'legacy', payment_unknown = 0 WHERE id = ?").run(o.id);
-      if (check === 'unpaid') db.prepare('UPDATE orders SET payment_unknown = 0 WHERE id = ?').run(o.id);
       if (PAID_STATUSES.includes(status)) newlyPaid = recordPayment(o.id, 'admin');
     });
   } catch (e) {

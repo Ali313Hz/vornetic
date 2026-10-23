@@ -187,6 +187,9 @@ async function setup({ stripe = false, smtp = false, env = {}, dataDir } = {}) {
   }
 }
 
+// Quoted-printable mail body → readable text (for checking what a message says)
+const qp = s => Buffer.from(s.replace(/=\r\n/g, '').replace(/=([0-9A-F]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16))), 'latin1').toString('utf8');
+
 // Waits until the fake SMTP has `n` messages, then a little longer to catch any duplicates
 async function settledMail(smtp, n) {
   for (let i = 0; i < 40 && smtp.messages.length < n; i++) await sleep(100);
@@ -347,20 +350,50 @@ test('card payment recorded by the admin during a slow confirmation still sends 
   } finally { await close(); }
 });
 
-test('card paid after the admin cancelled it: payment is recorded and a refund is flagged', async () => {
+// Codex P1 (14c64b2): a cancelled checkout that gets charged must be reported as paid, and both
+// the customer and the shop must hear about it — once.
+test('card paid after the admin cancelled it: recorded, reported as paid, customer and shop told once', async () => {
   const { srv, stripe, smtp, close } = await setup({ stripe: true, smtp: true });
   try {
+    await srv.admin('PUT', '/api/admin/settings', { shop_email: 'shop-inbox@example.test' });
     const p = await srv.newProduct(4);
     const r = await srv.order([{ id: p, qty: 1 }], { payment_method: 'card' });
     await srv.setOrder(r.body.ref, { status: 'cancelled' });
     stripe.state.paymentStatus = 'paid';
-    assert.strictEqual((await srv.confirm(r.body.ref, 'cs_test_1')).body.status, 'cancelled');
+    stripe.state.getDelayMs = 300;
+    // The customer's return page is opened twice at the same time
+    const [a, b] = await Promise.all([srv.confirm(r.body.ref, 'cs_test_1'), srv.confirm(r.body.ref, 'cs_test_1')]);
+    for (const c of [a, b]) assert.deepStrictEqual([c.body.status, c.body.paid], ['cancelled', true]);
+
     const o = await srv.orderByRef(r.body.ref);
-    assert.ok(o.paid_at);
-    assert.deepStrictEqual([o.needs_refund, o.refund_due_cents], [1, o.total_cents]);
+    assert.deepStrictEqual([!!o.paid_at, o.paid_via, o.needs_refund, o.refund_due_cents], [true, 'stripe', 1, o.total_cents]);
     assert.strictEqual((await srv.stats()).needs_refund, 1);
-    assert.strictEqual(await settledMail(smtp, 0), 0, 'no "thanks for your order" for a cancelled order');
+
+    assert.strictEqual(await settledMail(smtp, 2), 2, 'one to the customer, one to the shop — not 0, not 4');
+    const text = smtp.messages.map(qp);
+    const toCustomer = text.find(m => /^To: buyer@example\.test\r?$/m.test(m));
+    const toShop = text.find(m => /^To: shop-inbox@example\.test\r?$/m.test(m));
+    assert.ok(toCustomer && toShop, 'expected one message to each address');
+    assert.match(toCustomer, /ya estaba cancelado/);           // order language is Spanish
+    assert.match(toCustomer, /devolveremos el importe completo/);
+    assert.doesNotMatch(toCustomer, /Te avisaremos por email cuando salga|Gracias por tu pedido/);
+    assert.match(toShop, /iptal edilmişti ama kartla/);
+    for (const m of text) assert.ok(m.includes(r.body.ref));
   } finally { await close(); }
+});
+
+test('the card return page separates "paid" from "cancelled"', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'public', 'js', 'app.js'), 'utf8');
+  const fn = src.match(/^function cardResultKey[\s\S]*?^\}\r?$/m);
+  assert.ok(fn, 'cardResultKey not found in app.js');
+  const cardResultKey = new Function(fn[0] + '\nreturn cardResultKey;')();
+  assert.strictEqual(cardResultKey({ status: 'paid', paid: true }), 'paid_ok');
+  assert.strictEqual(cardResultKey({ status: 'cancelled', paid: true }), 'paid_cancelled');
+  assert.strictEqual(cardResultKey({ status: 'pending', paid: false }), 'pay_pending');
+  assert.strictEqual(cardResultKey({ status: 'cancelled', paid: false }), 'pay_pending');
+  assert.strictEqual(cardResultKey({ status: 'paid' }), 'paid_ok', 'older stored responses without "paid"');
+  assert.match(src, /paid_cancelled: 'We received your payment[^']*will refund the full amount/, 'English text');
+  assert.match(src, /paid_cancelled: 'Hemos recibido tu pago[^']*devolveremos el importe completo/, 'Spanish text');
 });
 
 // ---------- Codex P1: the fake Stripe address can never be used outside tests ----------
@@ -573,6 +606,70 @@ test('old orders: paid ones get an estimated date, cancelled ones are flagged "p
       assert.deepStrictEqual([o2.paid_at_estimated, o2.paid_via], [0, 'admin']);
       assert.strictEqual(o4.payment_unknown, 0);
     } finally { await ctx.close(); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Codex P2 (14c64b2): a wrong answer to "was this old order paid?" can be corrected, with history
+test('legacy payment answers can be corrected with confirmation, and every answer is kept', async () => {
+  const dir = tempDir();
+  try {
+    oldDatabase(dir, [
+      { ref: 'VN-OLD010', status: 'cancelled', total: 2500, created_at: '2026-03-01 09:00:00' },
+      { ref: 'VN-OLD011', status: 'cancelled', total: 1800, created_at: '2026-03-02 09:00:00' },
+      { ref: 'VN-OLD012', status: 'delivered', total: 1200, created_at: '2026-03-03 09:00:00' },
+    ]);
+    const { srv, close } = await setup({ dataDir: dir });
+    try {
+      const history = async ref => JSON.parse((await srv.orderByRef(ref)).payment_checks).map(c => c.answer);
+      const state = async ref => { const o = await srv.orderByRef(ref); return [o.paid_at, o.paid_via, o.needs_refund]; };
+
+      // Wrongly answered "unpaid" → corrected to "paid"
+      assert.strictEqual((await srv.setOrder('VN-OLD010', { payment_check: 'unpaid' })).status, 200);
+      assert.deepStrictEqual(await state('VN-OLD010'), [null, null, 0]);
+      let r = await srv.setOrder('VN-OLD010', { payment_check: 'paid' });
+      assert.strictEqual(r.status, 400, 'a correction needs explicit confirmation');
+      assert.match(r.body.error, /onay gerekli/);
+      assert.strictEqual((await srv.setOrder('VN-OLD010', { payment_check: 'unpaid', confirm_correction: true })).status, 400, 'same answer again');
+      assert.strictEqual((await srv.setOrder('VN-OLD010', { payment_check: 'paid', confirm_correction: true })).status, 200);
+      assert.deepStrictEqual(await state('VN-OLD010'), ['2026-03-01 09:00:00', 'check', 1]);
+      assert.deepStrictEqual(await history('VN-OLD010'), ['unpaid', 'paid']);
+      for (const c of JSON.parse((await srv.orderByRef('VN-OLD010')).payment_checks)) assert.match(c.created_at, /^\d{4}-\d{2}-\d{2} /);
+
+      // Wrongly answered "paid" → corrected to "unpaid" (the payment it created is removed)
+      await srv.setOrder('VN-OLD011', { payment_check: 'paid' });
+      assert.deepStrictEqual(await state('VN-OLD011'), ['2026-03-02 09:00:00', 'check', 1]);
+      assert.strictEqual((await srv.setOrder('VN-OLD011', { payment_check: 'unpaid', confirm_correction: true })).status, 200);
+      assert.deepStrictEqual(await state('VN-OLD011'), [null, null, 0]);
+      assert.deepStrictEqual(await history('VN-OLD011'), ['paid', 'unpaid']);
+      assert.strictEqual((await srv.orderByRef('VN-OLD011')).payment_unknown, 0);
+
+      // Once money was refunded on it, "paid" can no longer be turned into "unpaid"
+      assert.strictEqual((await srv.refund('VN-OLD010', 1000)).status, 200);
+      r = await srv.setOrder('VN-OLD010', { payment_check: 'unpaid', confirm_correction: true });
+      assert.strictEqual(r.status, 400);
+      assert.match(r.body.error, /iade kaydı var/);
+      assert.deepStrictEqual(await state('VN-OLD010'), ['2026-03-01 09:00:00', 'check', 1]);
+      assert.strictEqual(JSON.parse((await srv.orderByRef('VN-OLD010')).refunds).length, 1, 'refund history kept');
+      assert.deepStrictEqual(await history('VN-OLD010'), ['unpaid', 'paid'], 'a refused correction adds nothing');
+
+      // The check cannot touch real payments: an old delivered order never had a question
+      r = await srv.setOrder('VN-OLD012', { payment_check: 'unpaid', confirm_correction: true });
+      assert.strictEqual(r.status, 400);
+      assert.deepStrictEqual(await state('VN-OLD012'), ['2026-03-03 09:00:00', 'legacy', 0]);
+      assert.deepStrictEqual(await history('VN-OLD012'), []);
+
+      // Revenue follows the corrected answers: 2500 counted (by its estimated date), 1800 not
+      const db = new DatabaseSync(path.join(dir, 'store.db'));
+      try {
+        const paid = db.prepare("SELECT ref FROM orders WHERE paid_at IS NOT NULL ORDER BY ref").all().map(x => x.ref);
+        assert.deepStrictEqual(paid, ['VN-OLD010', 'VN-OLD012']);
+        assert.strictEqual(db.prepare('SELECT COUNT(*) c FROM payment_checks').get().c, 4);
+      } finally { db.close(); }
+
+      // Only admins can answer
+      const id = (await srv.orderByRef('VN-OLD011')).id;
+      assert.strictEqual((await srv.call('PUT', '/api/admin/orders/' + id, { payment_check: 'paid', confirm_correction: true })).status, 401);
+    } finally { await close(); }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

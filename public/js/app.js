@@ -40,6 +40,7 @@ const T = {
     accept: 'By placing the order you accept our', terms: 'terms of sale', and: 'and', privacy: 'privacy policy',
     have_account: 'Have an account?', login_faster: 'Log in to fill in your details automatically.',
     thanks: 'Thank you for your order!', order_ref: 'Order number', paid_ok: 'Payment received. We will email you when it ships.',
+    paid_cancelled: 'We received your payment, but this order had already been cancelled, so it will not be shipped. We will refund the full amount to your card and contact you by email.',
     pay_pending: 'We could not confirm the payment yet. If you were charged, we will confirm it by email.',
     bizum_do: 'Send the total by Bizum to this number. Write your order number in the concept.',
     transfer_do: 'Transfer the total to this account. Write your order number in the concept.',
@@ -123,6 +124,7 @@ const T = {
     accept: 'Al hacer el pedido aceptas nuestras', terms: 'condiciones de venta', and: 'y la', privacy: 'política de privacidad',
     have_account: '¿Tienes cuenta?', login_faster: 'Inicia sesión y rellenamos tus datos automáticamente.',
     thanks: '¡Gracias por tu pedido!', order_ref: 'Número de pedido', paid_ok: 'Pago recibido. Te avisaremos por email cuando salga.',
+    paid_cancelled: 'Hemos recibido tu pago, pero este pedido ya estaba cancelado, así que no se enviará. Te devolveremos el importe completo a tu tarjeta y te escribiremos por email.',
     pay_pending: 'Aún no hemos podido confirmar el pago. Si se ha cobrado, te lo confirmaremos por email.',
     bizum_do: 'Envía el total por Bizum a este número. Pon tu número de pedido en el concepto.',
     transfer_do: 'Haz una transferencia del total a esta cuenta. Pon tu número de pedido en el concepto.',
@@ -948,6 +950,14 @@ async function viewStripeReturn() {
   }
 }
 
+// Which message the card return page shows: payment received, payment received for an order that
+// had been cancelled (it will be refunded), or payment not confirmed yet
+function cardResultKey(o) {
+  const paid = o.paid ?? o.status === 'paid';
+  if (paid && o.status === 'cancelled') return 'paid_cancelled';
+  return paid ? 'paid_ok' : 'pay_pending';
+}
+
 async function viewOrderDone(ref) {
   setTitle(t('thanks'));
   let o = null;
@@ -955,7 +965,7 @@ async function viewOrderDone(ref) {
   if (!o || o.ref !== ref) o = { ref };
   const kv = (k, v) => `<div class="kv"><span class="muted">${esc(k)}</span><b>${esc(v)}</b></div>`;
   let body = '';
-  if (o.payment_method === 'card') body = `<p>${esc(o.status === 'paid' ? t('paid_ok') : t('pay_pending'))}</p>`;
+  if (o.payment_method === 'card') body = `<p>${esc(t(cardResultKey(o)))}</p>`;
   else if (o.payment_method === 'bizum') body = `<p>${esc(t('bizum_do'))}</p><div class="box paybox">${kv('Bizum', o.bizum_phone)}${kv(t('amount'), eur(o.total_cents))}${kv(t('concept'), o.ref)}</div>`;
   else if (o.payment_method === 'transfer') body = `<p>${esc(t('transfer_do'))}</p><div class="box paybox">${kv('IBAN', o.iban)}${o.iban_holder ? kv(t('holder'), o.iban_holder) : ''}${kv(t('amount'), eur(o.total_cents))}${kv(t('concept'), o.ref)}</div>`;
   else if (o.payment_method === 'contact') body = `<p>${esc(t('contact_do'))}</p>`;

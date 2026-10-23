@@ -132,7 +132,8 @@ for (const sql of [
   // A short-lived pre-release stored a password-derived tag here; remove it if present
   'ALTER TABLE admin_sessions DROP COLUMN pw_tag',
   // How the payment was recorded: 'stripe' (card, confirmed with Stripe), 'admin' (marked paid
-  // in the panel) or 'legacy' (order paid before payment dates were stored)
+  // in the panel), 'legacy' (order paid before payment dates were stored) or 'check' (old
+  // cancelled order the admin said was paid, see payment_checks)
   'ALTER TABLE orders ADD COLUMN paid_via TEXT',
   // 1 = cancelled before payment dates were stored: nobody knows if it was paid; the admin checks
   'ALTER TABLE orders ADD COLUMN payment_unknown INTEGER NOT NULL DEFAULT 0',
@@ -161,6 +162,16 @@ CREATE TABLE IF NOT EXISTS refunds (
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_refunds_order ON refunds(order_id);
+
+-- The admin's answers to "was this old cancelled order paid?" ('paid' | 'unpaid'), each with
+-- its date. Rows are only added: a corrected answer is a new row, so every decision stays visible.
+CREATE TABLE IF NOT EXISTS payment_checks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL,
+  answer TEXT NOT NULL CHECK (answer IN ('paid', 'unpaid')),
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_payment_checks_order ON payment_checks(order_id);
 `);
 db.exec('CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id)');
 

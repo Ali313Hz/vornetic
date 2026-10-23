@@ -119,8 +119,12 @@ function bindOrderCards(scope, after = show) {
       } catch (e) { toast(e.message); }
     });
     $$('[data-pchk]', el).forEach(btn => btn.addEventListener('click', async () => {
-      try { await send('/api/admin/orders/' + el.dataset.id, { payment_check: btn.dataset.pchk }); toast('Kaydedildi'); after(); }
-      catch (e) { toast(e.message); }
+      const fix = btn.dataset.fix === '1';
+      if (fix && !confirm(`Önceki cevap "${PCHK[btn.dataset.pchk === 'paid' ? 'unpaid' : 'paid']}" idi. "${PCHK[btn.dataset.pchk]}" olarak düzeltilsin mi? (Her iki cevap da tarihçede kalır.)`)) return;
+      try {
+        await send('/api/admin/orders/' + el.dataset.id, { payment_check: btn.dataset.pchk, ...(fix && { confirm_correction: true }) });
+        toast('Kaydedildi'); after();
+      } catch (e) { toast(e.message); }
     }));
     $('[data-cust]', el)?.addEventListener('click', () => { tab = 'customers'; drawTabs(); viewCustomer(+$('[data-cust]', el).dataset.cust); });
   });
@@ -128,6 +132,16 @@ function bindOrderCards(scope, after = show) {
 function waUrl(phone, text) {
   const p = (phone || '').replace(/[^\d]/g, '');
   return p ? `https://wa.me/${p.length === 9 ? '34' + p : p}?text=${encodeURIComponent(text)}` : '';
+}
+// Answers to "was this old cancelled order paid?", oldest first, with a button to correct the latest
+const PCHK = { paid: 'Ödenmişti', unpaid: 'Ödenmemişti' };
+function paymentCheckHtml(o) {
+  const checks = JSON.parse(o.payment_checks || '[]');
+  if (!checks.length) return '';
+  const last = checks[checks.length - 1].answer, other = last === 'paid' ? 'unpaid' : 'paid';
+  return `<div class="order-actions"><span class="small">Eski ödeme kontrolü: ${checks.map(c =>
+    `${esc(day(c.created_at))} <b>${PCHK[c.answer]}</b>`).join(' → ')}</span>
+    <button class="btn sm ghost" data-pchk="${other}" data-fix="1">Düzelt: ${PCHK[other]}</button></div>`;
 }
 function orderHtml(o) {
   const items = JSON.parse(o.items);
@@ -159,7 +173,8 @@ function orderHtml(o) {
       <button class="btn sm save">Kaydet</button>
     </div>
     ${o.payment_unknown ? `<div class="order-actions"><span class="small">Bu eski iptal sipariş ödenmiş miydi?</span>
-      <button class="btn sm ghost" data-pchk="paid">Ödenmişti</button><button class="btn sm ghost" data-pchk="unpaid">Ödenmemişti</button></div>` : ''}
+      <button class="btn sm ghost" data-pchk="paid">${PCHK.paid}</button><button class="btn sm ghost" data-pchk="unpaid">${PCHK.unpaid}</button></div>` : ''}
+    ${paymentCheckHtml(o)}
     ${o.paid_at && o.refund_total_cents < o.total_cents ? `<div class="order-actions">
       <input class="in rfd" inputmode="decimal" placeholder="İade € (ör. 12,50)" style="width:150px">
       <input class="in rfdnote" placeholder="Not (isteğe bağlı)" maxlength="200" style="min-width:180px">
