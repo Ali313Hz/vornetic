@@ -107,6 +107,10 @@ app.use(express.static(path.join(__dirname, 'public'), { index: false, maxAge: I
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
 
 // ---------- Uploads (photos and videos, admin only) ----------
+// One file per request, so every upload request has a small, known maximum size: the admin page
+// sends a selection of several files one after another. Nginx must accept one full-size video plus
+// the form overhead: client_max_body_size 81m in docs/nginx-vornetic.conf (checked by a test).
+const MAX_VIDEO_MB = 80, MAX_PHOTO_MB = 12;
 const IMG_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
 const VID_EXT = ['.mp4', '.webm'];
 const upload = multer({
@@ -115,7 +119,7 @@ const upload = multer({
     filename: (req, file, cb) =>
       cb(null, crypto.randomBytes(8).toString('hex') + path.extname(file.originalname).toLowerCase()),
   }),
-  limits: { fileSize: 80 * 1024 * 1024, files: 20 },
+  limits: { fileSize: MAX_VIDEO_MB * 1024 * 1024, files: 1 },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const ok = IMG_EXT.includes(ext) || VID_EXT.includes(ext);
@@ -601,6 +605,7 @@ app.post('/api/admin/logout', (req, res) => {
 app.get('/api/admin/me', requireAdmin, (req, res) => res.json({
   ok: true, stripe: !!STRIPE_KEY, mail: mail.enabled,
   open_withdrawals: db.prepare('SELECT COUNT(*) c FROM withdrawals WHERE handled = 0').get().c,
+  upload: { photo_mb: MAX_PHOTO_MB, video_mb: MAX_VIDEO_MB, photo_ext: IMG_EXT, video_ext: VID_EXT },
 }));
 app.post('/api/admin/test-mail', requireAdmin, async (req, res) => {
   if (!mail.enabled) return res.status(400).json({ error: 'E-posta ayarlı değil (SMTP_* ortam değişkenleri)' });
@@ -656,11 +661,11 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
 });
 
 // Uploads: returns [{ type, src }]
-app.post('/api/admin/upload', requireAdmin, upload.array('files', 20), (req, res) => {
+app.post('/api/admin/upload', requireAdmin, upload.array('files', 1), (req, res) => {
   const out = [];
   for (const f of req.files || []) {
     const isVideo = VID_EXT.includes(path.extname(f.filename));
-    if (!isVideo && f.size > 12 * 1024 * 1024) { fs.unlinkSync(f.path); continue; }   // photos max 12 MB
+    if (!isVideo && f.size > MAX_PHOTO_MB * 1024 * 1024) { fs.unlinkSync(f.path); continue; }   // photos max 12 MB
     out.push({ type: isVideo ? 'video' : 'image', src: '/uploads/' + f.filename });
   }
   res.json({ ok: true, media: out });

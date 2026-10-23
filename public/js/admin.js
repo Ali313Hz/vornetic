@@ -330,21 +330,43 @@ async function shrinkImage(file) {
     return blob ? new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file;
   } catch { return file; }
 }
+// Which selected files can be uploaded: right type and not too big (limits come from the server,
+// GET /api/admin/me). Files that would be refused anyway are skipped before using any bandwidth.
+function planUploads(list, limits) {
+  const lim = { photo_mb: 12, video_mb: 80, photo_ext: ['.jpg', '.jpeg', '.png', '.webp'], video_ext: ['.mp4', '.webm'], ...limits };
+  const send = [], skipped = [];
+  for (const f of list) {
+    const ext = (/\.[^.]+$/.exec(f.name || '') || [''])[0].toLowerCase();
+    const video = lim.video_ext.includes(ext), photo = lim.photo_ext.includes(ext);
+    const maxMb = video ? lim.video_mb : lim.photo_mb;
+    if (!video && !photo) skipped.push(`${f.name}: sadece JPG, PNG, WEBP fotoğraf veya MP4, WEBM video`);
+    else if (f.size > maxMb * 1024 * 1024) skipped.push(`${f.name}: ${video ? 'video' : 'fotoğraf'} en fazla ${maxMb} MB`);
+    else send.push(f);
+  }
+  return { send, skipped };
+}
+// One file per request (the server accepts one), one after another, so every request stays under
+// the server's and Nginx's size limit even when many large videos are selected together.
 async function uploadFiles(files) {
-  const list = [...files];
-  if (!list.length) return [];
-  const big = list.some(f => f.type.startsWith('video/'));
+  const { send, skipped } = planUploads([...files], ME.upload);
+  const media = [];
   const note = document.createElement('div');
-  note.className = 'toast'; note.textContent = big ? 'Video yükleniyor… sayfayı kapatma' : 'Yükleniyor…';
-  document.body.appendChild(note);
+  note.className = 'toast';
+  if (send.length) document.body.appendChild(note);
   try {
-    const fd = new FormData();
-    for (const f of list) fd.append('files', await shrinkImage(f));
-    const r = await api('/api/admin/upload', { method: 'POST', body: fd });
-    if (r.media.length < list.length) toast('Bazı dosyalar alınmadı (fotoğraf en fazla 12 MB, video MP4/WEBM)');
-    return r.media;
-  } catch (e) { toast(e.message); return []; }
-  finally { note.remove(); }
+    for (const [i, f] of send.entries()) {
+      note.textContent = `${f.type.startsWith('video/') ? 'Video yükleniyor' : 'Yükleniyor'} ${i + 1}/${send.length}… sayfayı kapatma`;
+      try {
+        const fd = new FormData();
+        fd.append('files', await shrinkImage(f));
+        const r = await api('/api/admin/upload', { method: 'POST', body: fd });
+        if (!r.media.length) skipped.push(`${f.name}: alınmadı (fotoğraf en fazla ${ME.upload?.photo_mb || 12} MB)`);
+        media.push(...r.media);
+      } catch (e) { skipped.push(`${f.name}: ${e.message}`); }
+    }
+  } finally { note.remove(); }
+  if (skipped.length) toast(`${skipped.length} dosya yüklenmedi — ${skipped.join(' · ')}`);
+  return media;
 }
 const mediaThumb = m => m.type === 'video'
   ? `<div class="vt">▶<span>video</span></div>` : `<img src="${esc(m.src)}" alt="" loading="lazy">`;

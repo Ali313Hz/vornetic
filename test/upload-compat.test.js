@@ -9,6 +9,8 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 
+const { INHERITED_SETTINGS } = require('./helpers');
+
 const ROOT = path.join(__dirname, '..');
 const TEST_PASSWORD = 'test-only-admin-password-123';
 let child, closed, base, dataDir, uploadDir, cookie;
@@ -34,7 +36,7 @@ before(async () => {
   try {
     const port = await freePort();
     const env = { ...process.env, PORT: String(port), DATA_DIR: dataDir, NODE_ENV: 'test', ADMIN_PASSWORD: TEST_PASSWORD };
-    for (const k of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'STRIPE_SECRET_KEY']) delete env[k];
+    for (const k of INHERITED_SETTINGS) delete env[k];
     child = spawn(process.execPath, ['server.js'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
     closed = new Promise(r => child.once('close', r));
     let log = '';
@@ -71,13 +73,17 @@ test('installed express and multer are the audited versions', () => {
   assert.strictEqual(require('multer/package.json').version.split('.')[0], '2');
 });
 
-test('photos and videos upload via diskStorage and are served back unchanged', async () => {
+test('photos and videos upload via diskStorage (one per request) and are served back unchanged', async () => {
   const before = listUploads();
   const jpg = bytes(2048, 1), png = bytes(1024, 2), mp4 = bytes(4096, 3);
-  const res = await upload([['front.jpg', jpg], ['Side.PNG', png], ['clip.mp4', mp4]]);
-  assert.strictEqual(res.status, 200);
-  const { ok, media } = await res.json();
-  assert.strictEqual(ok, true);
+  const media = [];
+  for (const file of [['front.jpg', jpg], ['Side.PNG', png], ['clip.mp4', mp4]]) {
+    const res = await upload([file]);
+    assert.strictEqual(res.status, 200, file[0]);
+    const body = await res.json();
+    assert.strictEqual(body.ok, true);
+    media.push(...body.media);
+  }
   assert.deepStrictEqual(media.map(m => m.type), ['image', 'image', 'video']);
   for (const m of media) assert.match(m.src, /^\/uploads\/[0-9a-f]{16}\.(jpg|png|mp4)$/);   // random name, lower-case ext
   assert.strictEqual(listUploads().length, before.length + 3);
@@ -107,21 +113,42 @@ test('a path in the client file name cannot escape the uploads folder', async ()
 
 test('photos over 12 MB are discarded after upload', async () => {
   const before = listUploads();
-  const res = await upload([['big.jpg', Buffer.alloc(12 * 1024 * 1024 + 1)], ['small.webp', bytes(100)]]);
+  let res = await upload([['big.jpg', Buffer.alloc(12 * 1024 * 1024 + 1)]]);
   assert.strictEqual(res.status, 200);
-  const { media } = await res.json();
-  assert.strictEqual(media.length, 1);
-  assert.match(media[0].src, /\.webp$/);
+  assert.deepStrictEqual((await res.json()).media, []);
+  res = await upload([['small.webp', bytes(100)]]);
+  assert.match((await res.json()).media[0].src, /\.webp$/);
   assert.strictEqual(listUploads().length, before.length + 1);
 });
 
-test('more than 20 files is rejected with 400 and partial files are cleaned up', async () => {
+// Codex P2 (PR #14): every upload request must fit the Nginx limit (one 80 MB file + form overhead)
+test('more than one file per request is rejected with 400 and nothing is stored', async () => {
   const before = listUploads();
-  const files = Array.from({ length: 21 }, (_, i) => [`p${i}.jpg`, bytes(16, i)]);
-  const res = await upload(files);
-  assert.strictEqual(res.status, 400);
-  assert.ok((await res.json()).error);
+  for (const count of [2, 21]) {
+    const res = await upload(Array.from({ length: count }, (_, i) => [`p${i}.jpg`, bytes(16, i)]));
+    assert.strictEqual(res.status, 400, `${count} files`);
+    assert.ok((await res.json()).error);
+  }
+  assert.deepStrictEqual(listUploads(), before, 'partial files cleaned up');
+});
+
+test('a video up to 80 MB is accepted; one byte more is refused and nothing is stored', async () => {
+  const MB = 1024 * 1024;
+  let before = listUploads();
+  const ok = await upload([['max.mp4', Buffer.alloc(80 * MB)]]);
+  assert.strictEqual(ok.status, 200);
+  assert.strictEqual((await ok.json()).media[0].type, 'video');
+  assert.strictEqual(listUploads().length, before.length + 1);
+  before = listUploads();
+  const big = await upload([['too-big.mp4', Buffer.alloc(80 * MB + 1)]]);
+  assert.strictEqual(big.status, 400);
+  assert.match((await big.json()).error, /too large/i);
   assert.deepStrictEqual(listUploads(), before);
+});
+
+test('the admin page gets the same upload limits the server enforces', async () => {
+  const me = await (await fetch(base + '/api/admin/me', { headers: { Cookie: cookie } })).json();
+  assert.deepStrictEqual(me.upload, { photo_mb: 12, video_mb: 80, photo_ext: ['.jpg', '.jpeg', '.png', '.webp'], video_ext: ['.mp4', '.webm'] });
 });
 
 test('unexpected form field is rejected with 400', async () => {
