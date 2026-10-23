@@ -418,7 +418,7 @@ test('STRIPE_API_URL is honoured only in tests and only for a local address', ()
 
 test('a production server warns that STRIPE_API_URL is ignored', async () => {
   // No STRIPE_SECRET_KEY, so this server cannot call any Stripe at all
-  const { srv, stripe, close } = await setup({ stripe: true, env: { NODE_ENV: 'production', STRIPE_SECRET_KEY: '' } });
+  const { srv, stripe, close } = await setup({ stripe: true, env: { NODE_ENV: 'production', PUBLIC_URL: 'https://shop.example.test', STRIPE_SECRET_KEY: '' } });
   try {
     assert.match(srv.log, /STRIPE_API_URL is ignored/);
     assert.strictEqual(stripe.state.creates + stripe.state.gets, 0);

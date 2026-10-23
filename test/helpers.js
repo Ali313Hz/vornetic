@@ -106,4 +106,40 @@ function oldDatabase(dir, orders) {
   db.close();
 }
 
-module.exports = { ROOT, ADMIN_PASSWORD, CUSTOMER, tempDir, startServer, oldDatabase };
+// Fake SMTP server on 127.0.0.1 that accepts everything and keeps the messages.
+// env: the SMTP_* settings to give startServer. text(i): message i, quoted-printable decoded.
+async function fakeSmtp() {
+  const messages = [], sockets = new Set();
+  const server = net.createServer(sock => {
+    sockets.add(sock);
+    sock.on('close', () => sockets.delete(sock));
+    let buf = '', inData = false, login = 0;
+    sock.write('220 fake.example.test ESMTP\r\n');
+    sock.on('data', d => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf(inData ? '\r\n.\r\n' : '\r\n')) !== -1) {
+        if (inData) { messages.push(buf.slice(0, i)); buf = buf.slice(i + 5); inData = false; sock.write('250 queued\r\n'); continue; }
+        const line = buf.slice(0, i); buf = buf.slice(i + 2);
+        if (login) { login--; sock.write(login ? '334 UGFzc3dvcmQ6\r\n' : '235 ok\r\n'); }
+        else if (/^EHLO/i.test(line)) sock.write('250-fake.example.test\r\n250 AUTH PLAIN LOGIN\r\n');
+        else if (/^AUTH LOGIN/i.test(line)) { login = 2; sock.write('334 VXNlcm5hbWU6\r\n'); }
+        else if (/^AUTH/i.test(line)) sock.write('235 ok\r\n');
+        else if (/^DATA/i.test(line)) { inData = true; sock.write('354 go\r\n'); }
+        else if (/^QUIT/i.test(line)) sock.end('221 bye\r\n');
+        else sock.write('250 ok\r\n');
+      }
+    });
+    sock.on('error', () => {});
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const qp = s => Buffer.from(s.replace(/=\r\n/g, '').replace(/=([0-9A-F]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16))), 'latin1').toString('utf8');
+  return {
+    messages, server, text: i => qp(messages[i]),
+    env: { SMTP_HOST: '127.0.0.1', SMTP_PORT: String(server.address().port), SMTP_USER: 'test@example.test', SMTP_PASS: 'test-only', MAIL_FROM: 'Shop <shop@example.test>' },
+    async waitFor(n) { for (let i = 0; i < 50 && messages.length < n; i++) await new Promise(r => setTimeout(r, 100)); return messages.length; },
+    close: () => new Promise(r => { for (const s of sockets) s.destroy(); server.close(r); }),
+  };
+}
+
+module.exports = { ROOT, ADMIN_PASSWORD, CUSTOMER, tempDir, startServer, oldDatabase, fakeSmtp };

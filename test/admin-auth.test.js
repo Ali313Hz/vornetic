@@ -11,6 +11,7 @@ const net = require('node:net');
 
 const ROOT = path.join(__dirname, '..');
 const TEST_PASSWORD = 'test-only-admin-password-123';
+const PROD_URL = 'https://shop.example.test';   // production mode requires PUBLIC_URL
 
 const freePort = () => new Promise((resolve, reject) => {
   const s = net.createServer().listen(0, '127.0.0.1', () => {
@@ -131,7 +132,7 @@ test('login rate limit cannot be bypassed by changing URL case or adding a trail
 });
 
 test('in production the built-in default password never works', async () => {
-  const srv = await startServer({ NODE_ENV: 'production', ADMIN_PASSWORD: undefined });
+  const srv = await startServer({ NODE_ENV: 'production', PUBLIC_URL: PROD_URL, ADMIN_PASSWORD: undefined });
   try {
     const res = await login(srv.base, 'vornetic2026');
     assert.strictEqual(res.status, 503);
@@ -141,7 +142,7 @@ test('in production the built-in default password never works', async () => {
 });
 
 test('in production an explicitly configured default password is also refused', async () => {
-  const srv = await startServer({ NODE_ENV: 'production', ADMIN_PASSWORD: 'vornetic2026' });
+  const srv = await startServer({ NODE_ENV: 'production', PUBLIC_URL: PROD_URL, ADMIN_PASSWORD: 'vornetic2026' });
   try {
     assert.strictEqual((await login(srv.base, 'vornetic2026')).status, 503);
   } finally { await srv.stop(); }
@@ -173,7 +174,7 @@ test('pre-upgrade admin session is rejected when a strong password is configured
   const dir = tempDataDir();
   try {
     const cookie = seedPreUpgradeSession(dir);
-    const srv = await startServer({ NODE_ENV: 'production', ADMIN_PASSWORD: TEST_PASSWORD }, dir);
+    const srv = await startServer({ NODE_ENV: 'production', PUBLIC_URL: PROD_URL, ADMIN_PASSWORD: TEST_PASSWORD }, dir);
     try {
       assert.strictEqual((await me(srv.base, cookie)).status, 401);
       const orders = await fetch(srv.base + '/api/admin/orders', { headers: { Cookie: cookie } });
@@ -196,7 +197,7 @@ test('pre-upgrade admin session is rejected while production is locked (default 
   const dir = tempDataDir();
   try {
     const cookie = seedPreUpgradeSession(dir);
-    const srv = await startServer({ NODE_ENV: 'production', ADMIN_PASSWORD: undefined }, dir);
+    const srv = await startServer({ NODE_ENV: 'production', PUBLIC_URL: PROD_URL, ADMIN_PASSWORD: undefined }, dir);
     try {
       assert.notStrictEqual((await me(srv.base, cookie)).status, 200);
       const s = await fetch(srv.base + '/api/admin/settings', { headers: { Cookie: cookie } });
@@ -217,7 +218,7 @@ test('session made with the default password stops working once a strong passwor
       assert.strictEqual((await me(dev.base, cookie)).status, 200);
     } finally { await dev.stop(); }
 
-    const prod = await startServer({ NODE_ENV: 'production', ADMIN_PASSWORD: TEST_PASSWORD }, dir);
+    const prod = await startServer({ NODE_ENV: 'production', PUBLIC_URL: PROD_URL, ADMIN_PASSWORD: TEST_PASSWORD }, dir);
     try {
       assert.strictEqual((await me(prod.base, cookie)).status, 401);
     } finally { await prod.stop(); }

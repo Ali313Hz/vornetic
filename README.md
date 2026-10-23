@@ -101,11 +101,13 @@ curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
 sudo npm i -g pm2
 # projeyi kopyala, .env dosyasını oluştur (PUBLIC_URL=https://vornetic.com ve NODE_ENV=production ekle), sonra:
-npm install
+npm ci            # package-lock.json'daki sürümlerin aynısını kurar
 pm2 start npm --name vornetic -- start
 pm2 save && pm2 startup
 ```
 HTTPS için Nginx + Certbot (ücretsiz) — müşteri şifreleri olduğu için **HTTPS şart**. Alan adının DNS A kaydını sunucu IP'sine yönlendir.
+
+**`PUBLIC_URL` canlıda zorunlu:** `NODE_ENV=production` iken `PUBLIC_URL` yoksa, `https://` ile başlamıyorsa ya da adresten sonra yol içeriyorsa (ör. `/magaza`) site **açılmaz** ve kayıtta nedenini yazar. Şifre sıfırlama, sipariş e-postaları, Stripe dönüş sayfaları ve sitemap linkleri sadece bu adresten üretilir; böylece sahte bir `Host` başlığıyla müşteriye başka bir siteye giden link gönderilemez. Canlıda site ayrıca tarayıcılara `Strict-Transport-Security` başlığı gönderir (bir yıl boyunca sadece https).
 
 Yayına aldıktan sonra:
 - **Google Search Console** → siteyi ekle → `https://vornetic.com/sitemap.xml` gönder.
@@ -124,8 +126,8 @@ Yayına aldıktan sonra:
 | `ADMIN_PASSWORD` | Panel şifresi |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | E-posta |
 | `STRIPE_SECRET_KEY` | Kart ödemesi (boşsa kart kapalı) |
-| `PUBLIC_URL` | Sitenin adresi, ör. `https://vornetic.com` (e-posta linkleri, Stripe, sitemap) |
-| `NODE_ENV=production` | Canlıda ayarla (güvenli çerezler) |
+| `PUBLIC_URL` | Sitenin adresi, ör. `https://vornetic.com` (e-posta linkleri, Stripe, sitemap). **Canlıda zorunlu**, `https://` ile ve yolsuz |
+| `NODE_ENV=production` | Canlıda ayarla (güvenli çerezler, HSTS, `PUBLIC_URL` kontrolü) |
 | `PORT` | Varsayılan 3300 |
 | `DATA_DIR` | Veritabanı/fotoğraf klasörü (varsayılan `./data`) |
 

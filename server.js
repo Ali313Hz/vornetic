@@ -21,8 +21,29 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_API = stripeConfig.apiBase();
 if (stripeConfig.overrideIgnored()) console.warn('⚠  STRIPE_API_URL is ignored: it only works in the automated tests. Remove it from .env.');
-const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const IS_PROD = process.env.NODE_ENV === 'production';
+
+// The shop's address, e.g. https://vornetic.com. Every link we send out — password reset, order
+// e-mails, Stripe return pages, sitemap — is built from it. Without it the address would come from
+// the request's Host header, which anyone can fake: a password-reset e-mail could then point to
+// someone else's site and hand them the reset token. So in production it is required, must be
+// https:// and must be just the address (no path). In development it is optional.
+function publicUrl(raw) {
+  const value = String(raw || '').trim();
+  let u = null;
+  try { u = value ? new URL(value) : null; } catch { /* invalid, handled below */ }
+  const ok = u && (u.protocol === 'https:' || (!IS_PROD && u.protocol === 'http:'))
+    && u.pathname === '/' && !u.search && !u.hash && !u.username && !u.password;
+  if (ok) return u.origin;
+  const why = value ? `PUBLIC_URL "${value}" is not valid` : 'PUBLIC_URL is not set';
+  if (IS_PROD) {
+    console.error(`✖  ${why}. In production set it in .env to the shop's https address, e.g. PUBLIC_URL=https://vornetic.com`);
+    process.exit(1);
+  }
+  if (value) console.warn(`⚠  ${why}; using the address of each request (fine for local testing only).`);
+  return '';
+}
+const PUBLIC_URL = publicUrl(process.env.PUBLIC_URL);
 
 // The default password is public (README, source). In production it never unlocks the panel.
 const ADMIN_LOCKED = IS_PROD && ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD;
@@ -45,6 +66,9 @@ app.use((req, res, next) => {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'SAMEORIGIN',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
+    // In production: browsers must use https for this site for the next year (only this host,
+    // not subdomains, so a mail or other subdomain without https keeps working)
+    ...(IS_PROD && { 'Strict-Transport-Security': 'max-age=31536000' }),
   });
   next();
 });
@@ -107,6 +131,8 @@ function shippingFor(zone, subtotal, s) {
   const fee = zone === 'ib' ? n('ship_ib_cents') : n('ship_pt_cents');
   return n('free_far_cents') && subtotal >= n('free_far_cents') ? 0 : fee;
 }
+// Links we send out. In production PUBLIC_URL is always set (see publicUrl above), so the Host
+// header is only used in local development.
 const baseUrl = req => PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
 
 // Validate a car chosen in the store against data/cars.txt
