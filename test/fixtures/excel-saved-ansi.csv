@@ -1,0 +1,12 @@
+id,type,date,amount_eur,category,note,country,party,reference
+,web_sale,2026-10-01,43.85,web,Web sitesi sipari?i,ES,,VN-AD8EFD
+8,gider,2026-10-15,29.99,Reklam,'=SUM(A1:A3),,'+34 Test Ads SL,'@promo-1
+1,gelir,2026-10-23,89.90,Amazon,Xenon D1S — mü?teri García,,,
+2,gelir,2026-10-23,45.90,Wallapop,LED H7 çifti,,,
+3,gelir,2026-10-23,26.50,Vinted,fiyat düzeltildi,,,
+4,gelir,2026-10-23,"1,250.00",Toptan / do?rudan mü?teri,20 set xenon,FR,Garage Test SARL,F-2026-101
+7,gider,2026-10-23,150.00,Depo / kira,Ekim depo kiras?,,,
+,web_refund,2026-10-23,10.00,web,Web sitesi iadesi,ES,,VN-9C4D28
+9,gelir,2026-10-24,35.00,Wallapop,LED H11,,Comprador Uno,
+10,gelir,2026-10-24,35.00,Wallapop,LED H11,,Comprador Dos,
+11,gider,2026-10-24,12.40,Kargo / lojistik,Correos envío,,,

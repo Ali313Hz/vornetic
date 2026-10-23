@@ -66,7 +66,7 @@ async function startServer(env = {}, dataDir) {
     };
     const admin = (method, url, body) => call(method, url, body, { Cookie: cookie });
     const srv = {
-      base, dataDir, stop: cleanup, get log() { return log; }, call, admin,
+      base, dataDir, cookie, stop: cleanup, get log() { return log; }, call, admin,
       order: (items, extra = {}) => call('POST', '/api/orders', { ...CUSTOMER, payment_method: 'contact', ...extra, items }),
       async newProduct(stock, price_cents = 1000) {
         const cat = (await admin('GET', '/api/admin/categories')).body[0].slug;

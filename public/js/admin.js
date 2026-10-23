@@ -10,9 +10,16 @@ const toEuro = c => c == null ? '' : (c / 100).toFixed(2);
 const day = s => (s || '').slice(0, 16);
 // Euro text typed by the admin → cents. "12,50" "12.5" "12" are fine; anything else → null
 // (never silently 0), so a typo shows an error instead of being saved.
+// Same formats as the CSV import: "12", "12,5", "12.50", "1.250,00" (Spain/Turkey), "1,250.00",
+// with or without "€". "1.250" stays an error: it could be 1250 € or 1,25 €.
 function parseEuro(text) {
-  const m = /^\s*(\d{1,7})(?:[.,](\d{1,2}))?\s*$/.exec(String(text ?? ''));
-  return m ? Number(m[1]) * 100 + Number((m[2] || '').padEnd(2, '0')) : null;
+  const s = String(text ?? '').replace(/€|eur/gi, '').replace(/[\s ]/g, '');
+  const cents = (whole, frac = '') => Number(whole) * 100 + Number(frac.padEnd(2, '0'));
+  let m;
+  if ((m = /^(\d{1,7})(?:[.,](\d{1,2}))?$/.exec(s))) return cents(m[1], m[2]);
+  if ((m = /^(\d{1,3}(?:\.\d{3}){1,2}),(\d{1,2})$/.exec(s))) return cents(m[1].replace(/\./g, ''), m[2]);
+  if ((m = /^(\d{1,3}(?:,\d{3}){1,2})\.(\d{1,2})$/.exec(s))) return cents(m[1].replace(/,/g, ''), m[2]);
+  return null;
 }
 // Warning for a paid order that was cancelled but not fully refunded (null = nothing to show)
 function refundWarning(o) {
@@ -729,8 +736,9 @@ async function viewFinance() {
     <div class="section-head fin-head"><h2>Finans</h2>
       <div class="fin-tools">
         <input class="in" type="month" id="fm" value="${d.month}" aria-label="Ay">
-        <a class="btn ghost sm" href="/api/admin/finance/export.csv?month=${d.month}" download>CSV indir (bu ay)</a>
-        <a class="btn ghost sm" href="/api/admin/finance/export.csv" download>CSV indir (tümü)</a>
+        <a class="btn ghost sm" href="/api/admin/finance/export.xlsx?month=${d.month}" download>Excel indir (bu ay)</a>
+        <a class="btn ghost sm" href="/api/admin/finance/export.xlsx" download>Excel indir (tümü)</a>
+        <a class="btn ghost sm" href="/api/admin/finance/export.csv?month=${d.month}" download>CSV indir</a>
         <label class="btn ghost sm" style="cursor:pointer">CSV içe aktar<input type="file" id="fimp" accept=".csv,text/csv" hidden></label>
         <button class="btn ghost sm" id="fsample">Örnek CSV</button>
       </div></div>
@@ -843,11 +851,22 @@ function financeForm(kind, C, e = {}) {
   });
 }
 
+// File bytes → text, only if they are valid UTF-8 (else null). Excel's plain "CSV" uses the old
+// Windows encoding; reading it as UTF-8 garbles accents, and garbled rows look like new entries.
+function readUtf8(bytes) {
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return null; }
+}
+
 // CSV import: first a preview (nothing saved), then one click saves all rows — or none, if any row has an error
 async function financeImport(file, C) {
   const box = $('#fimpres');
   if (file.size > 120 * 1024) { box.innerHTML = '<p class="notice err">Dosya çok büyük (en fazla 120 KB / 500 satır). Dosyayı böl.</p>'; return; }
-  const csv = await file.text();
+  const csv = readUtf8(await file.arrayBuffer());
+  if (csv === null) {
+    box.innerHTML = '<p class="notice err">Dosya UTF-8 değil (Excel\'in normal "CSV" kaydı). Türkçe/İspanyolca harfler bozulur ve kayıtlar iki kez eklenebilir. '
+      + 'Excel\'de <b>Farklı Kaydet → CSV UTF-8 (virgülle ayrılmış)</b> seçip tekrar yükle.</p>';
+    return;
+  }
   let r;
   try { r = await send('/api/admin/finance/import', { csv, dry_run: true }, 'POST'); }
   catch (err) { box.innerHTML = `<p class="notice err">${esc(err.message)}</p>`; return; }
@@ -857,9 +876,9 @@ async function financeImport(file, C) {
     ${r.errors.length ? `<p class="notice err" style="margin-top:10px">Hataları dosyada düzeltip tekrar yükle — hata varken hiçbir satır kaydedilmez.${list(r.errors, x => `Satır ${x.line}: ${esc(x.msg)}`)}</p>` : ''}
     ${r.warnings.length ? `<p class="notice" style="margin-top:10px">${r.warnings.map(esc).join('<br>')}</p>` : ''}
     ${list(r.duplicates, x => `Satır ${x.line}: ${esc(x.reason)}`)}
-    ${r.add.length ? `<div class="table-wrap" style="margin-top:10px"><table><tr><th>Satır</th><th>Tür</th><th>Tarih</th><th>Kategori</th><th style="text-align:right">Tutar</th><th>Not</th></tr>
+    ${r.add.length ? `<div class="table-wrap" style="margin-top:10px"><table><tr><th>Satır</th><th>Tür</th><th>Tarih</th><th>Kategori</th><th style="text-align:right">Tutar</th><th>Not</th><th>Kişi / firma</th><th>Ref</th></tr>
       ${r.add.slice(0, 20).map(x => `<tr><td>${x.line}</td><td>${x.kind === 'income' ? 'Gelir' : 'Gider'}</td><td>${esc(x.date)}</td><td>${esc(C[x.kind][x.category] || x.category)}</td>
-        <td style="text-align:right">${eur(x.amount_cents)}</td><td>${esc(x.note)}</td></tr>`).join('')}</table></div>
+        <td style="text-align:right">${eur(x.amount_cents)}</td><td>${esc(x.note)}</td><td>${esc(x.party)}</td><td>${esc(x.reference)}</td></tr>`).join('')}</table></div>
       ${r.add.length > 20 ? `<p class="muted small">… ve ${r.add.length - 20} satır daha</p>` : ''}` : ''}
     <div class="fin-tools" style="margin-top:12px">
       ${!r.errors.length && r.add_count ? `<button class="btn" id="fimpgo">İçe aktar (${r.add_count} kayıt)</button>` : ''}

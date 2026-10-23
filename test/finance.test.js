@@ -506,6 +506,124 @@ test('CSV rows are in order of the Madrid date shown in the file', async () => {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+// ---------- Excel (.xlsx) export (manual test 2026-10-23: the ";" CSV opens in one column in English Excel) ----------
+// Reads a stored (uncompressed) ZIP like the ones xlsx.js writes, checking each file's CRC
+function unzipStored(buf) {
+  const files = {};
+  const end = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  assert.ok(end > 0, 'no ZIP end record');
+  let p = buf.readUInt32LE(end + 16);
+  for (let i = 0; i < buf.readUInt16LE(end + 10); i++) {
+    assert.strictEqual(buf.readUInt32LE(p), 0x02014b50, 'central directory entry');
+    const size = buf.readUInt32LE(p + 20), nameLen = buf.readUInt16LE(p + 28), off = buf.readUInt32LE(p + 42);
+    const name = buf.slice(p + 46, p + 46 + nameLen).toString('utf8');
+    assert.strictEqual(buf.readUInt32LE(off), 0x04034b50, 'local header for ' + name);
+    const start = off + 30 + buf.readUInt16LE(off + 26) + buf.readUInt16LE(off + 28);
+    const data = buf.slice(start, start + size);
+    assert.strictEqual(require('zlib').crc32(data), buf.readUInt32LE(p + 16), 'CRC of ' + name);
+    files[name] = data.toString('utf8');
+    p += 46 + nameLen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  return files;
+}
+
+test('Excel export: a real .xlsx with numbers as numbers and text that can never be a formula', async () => {
+  const dir = tempDir();
+  try {
+    oldDatabase(dir, [{ ref: 'VN-XL001', status: 'delivered', total: 4385, created_at: '2026-09-30 22:30:00' }]);   // 1 Oct 00:30 Madrid
+    const srv = await startServer({}, dir);
+    try {
+      assert.strictEqual((await srv.call('GET', FIN + '/export.xlsx')).status, 401, 'admin only');
+      await srv.admin('POST', FIN + '/entries', { kind: 'income', amount_cents: 125000, category: 'wholesale', date: '2026-10-07',
+        note: 'Ekim — müşteri García & <Hijos>', party: 'Garage Test SARL', reference: 'F-1', country: 'FR' });
+      await srv.admin('POST', FIN + '/entries', entry({ date: '2026-10-15', category: 'advertising', amount_cents: 2999, note: '=SUM(A1:A3)', party: '+34 Test' }));
+      await srv.admin('POST', FIN + '/entries', entry({ date: '2026-11-02', amount_cents: 100 }));   // other month
+
+      const r = await fetch(srv.base + FIN + '/export.xlsx?month=2026-10', { headers: { Cookie: srv.cookie } });
+      assert.strictEqual(r.status, 200);
+      assert.strictEqual(r.headers.get('content-type'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      assert.match(r.headers.get('content-disposition'), /filename="vornetic-finans-2026-10\.xlsx"/);
+      const files = unzipStored(Buffer.from(await r.arrayBuffer()));
+      assert.deepStrictEqual(Object.keys(files).sort(), ['[Content_Types].xml', '_rels/.rels', 'xl/_rels/workbook.xml.rels',
+        'xl/styles.xml', 'xl/workbook.xml', 'xl/worksheets/sheet1.xml']);
+      const sheet = files['xl/worksheets/sheet1.xml'];
+      assert.doesNotMatch(sheet, /<f[ >]/, 'no formulas anywhere');
+      assert.match(sheet, /<c r="D2" s="1"><v>43\.85<\/v><\/c>/, 'web sale on 1 Oct (Madrid) as a number');
+      assert.match(sheet, /<c r="D3" s="1"><v>1250<\/v><\/c>/, 'wholesale amount as a number');
+      assert.match(sheet, /<t xml:space="preserve">2026-10-01<\/t>/, 'Madrid date as text');
+      assert.match(sheet, /Ekim — müşteri García &amp; &lt;Hijos&gt;/, 'accents kept, XML escaped');
+      assert.match(sheet, />'=SUM\(A1:A3\)</, 'formula-like note marked as text, same as the CSV');
+      assert.match(sheet, />'\+34 Test</);
+      assert.ok(!sheet.includes('2026-11-02'), 'only the chosen month');
+      for (const h of ['id', 'type', 'date', 'amount_eur', 'category', 'note', 'country', 'party', 'reference'])
+        assert.match(sheet, new RegExp(`<c r="[A-I]1" t="inlineStr" s="2"><is><t xml:space="preserve">${h}</t>`), 'header ' + h);
+      assert.match(files['xl/workbook.xml'], /<sheet name="Finans 2026-10"/);
+    } finally { await srv.stop(); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a sheet saved from Excel as CSV (English or Spanish settings) imports without duplicates', async () => {
+  const srv = await startServer();
+  try {
+    await srv.admin('POST', FIN + '/entries', { kind: 'income', amount_cents: 125000, category: 'wholesale', date: '2026-10-07', party: 'Garage Test SARL', reference: 'F-1', country: 'FR' });
+    await srv.admin('POST', FIN + '/entries', entry({ date: '2026-10-15', category: 'advertising', amount_cents: 2999, note: '=SUM(A1:A3)' }));
+    // What Excel writes for our .xlsx: English → "," and "1,250.00"; Spanish → ";" and "1.250,00"
+    const english = 'id,type,date,amount_eur,category,note,country,party,reference\r\n'
+      + '1,gelir,2026-10-07,"1,250.00",Toptan / doğrudan müşteri,,FR,Garage Test SARL,F-1\r\n'
+      + "2,gider,2026-10-15,29.99,Reklam,'=SUM(A1:A3),,,\r\n,web_sale,2026-10-01,43.85,web,Web sitesi siparişi,ES,,VN-XL001\r\n";
+    const spanish = 'id;type;date;amount_eur;category;note;country;party;reference\r\n'
+      + '1;gelir;2026-10-07;1.250,00;Toptan / doğrudan müşteri;;FR;Garage Test SARL;F-1\r\n'
+      + "2;gider;2026-10-15;29,99;Reklam;'=SUM(A1:A3);;;\r\n";
+    for (const csv of [english, spanish]) {
+      const r = await srv.admin('POST', FIN + '/import', { csv, dry_run: true });
+      assert.deepStrictEqual([r.body.errors.length, r.body.add_count, r.body.duplicates.length], [0, 0, 2], JSON.stringify(r.body));
+    }
+  } finally { await srv.stop(); }
+});
+
+// Manual test 2026-10-23: Excel's plain "CSV (Comma delimited)" is Windows-1252, not UTF-8. Read as
+// UTF-8 its accents became "�", the rows no longer matched the saved entries, and the preview
+// offered to add 5 entries a second time. Fixtures are the files real Excel 16 saved (fake data).
+const fixture = name => fs.readFileSync(path.join(__dirname, 'fixtures', name));
+
+test('a CSV saved in the old Windows encoding is refused, so nothing is added twice', async () => {
+  const ansi = fixture('excel-saved-ansi.csv');
+  assert.notDeepStrictEqual([...ansi.slice(0, 3)], [0xef, 0xbb, 0xbf], 'fixture is the non-UTF-8 file');
+  // The browser now refuses it before upload
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'admin.js'), 'utf8');
+  const fn = src.match(/^function readUtf8[\s\S]*?^\}\r?$/m);
+  assert.ok(fn, 'readUtf8 not found in admin.js');
+  const readUtf8 = new Function(fn[0] + '\nreturn readUtf8;')();
+  assert.strictEqual(readUtf8(ansi), null);
+  assert.match(readUtf8(fixture('excel-saved-utf8.csv')), /müşteri García/);
+  assert.match(src, /const csv = readUtf8\(await file\.arrayBuffer\(\)\);\s+if \(csv === null\)/);
+
+  // And the server refuses text that was decoded with replacement characters
+  const srv = await startServer();
+  try {
+    const r = await srv.admin('POST', FIN + '/import', { csv: ansi.toString('utf8') });
+    assert.strictEqual(r.status, 400);
+    assert.match(r.body.errors[0].msg, /UTF-8 değil.*CSV UTF-8/);
+    assert.deepStrictEqual([r.body.saved, r.body.add_count], [0, 0]);
+    const ok = await srv.admin('POST', FIN + '/import', { csv: fixture('excel-saved-utf8.csv').toString('utf8'), dry_run: true });
+    assert.deepStrictEqual([ok.body.errors.length, ok.body.add_count, ok.body.ignored.length], [0, 9, 2]);
+  } finally { await srv.stop(); }
+});
+
+test('a "?" inside a word (letters lost by Excel) gets a warning', () => {
+  const r = finance.readImport('type;date;amount;category;note\ngider;2026-10-01;150;depo;Ekim depo kiras?\ngelir;2026-10-01;5;toptan;do?rudan\ngelir;2026-10-02;6;amazon;normal note', () => 0);
+  assert.strictEqual(r.errors.length, 0);
+  assert.strictEqual(r.add.length, 3);
+  assert.ok(r.warnings.some(w => /^Satır 2, 3: kelime içinde "\?" var/.test(w)), r.warnings.join('\n'));
+});
+
+test('the admin page offers the Excel download and shows buyer and reference in the import preview', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'admin.js'), 'utf8');
+  assert.match(src, /href="\/api\/admin\/finance\/export\.xlsx\?month=\$\{d\.month\}" download>Excel indir \(bu ay\)/);
+  assert.match(src, /<th>Kişi \/ firma<\/th><th>Ref<\/th>/);
+  assert.match(src, /<td>\$\{esc\(x\.party\)\}<\/td><td>\$\{esc\(x\.reference\)\}<\/td>/);
+});
+
 test('import: missing columns, empty files and oversized batches are refused', async () => {
   const srv = await startServer();
   try {
