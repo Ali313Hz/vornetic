@@ -21,8 +21,45 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_API = stripeConfig.apiBase();
 if (stripeConfig.overrideIgnored()) console.warn('⚠  STRIPE_API_URL is ignored: it only works in the automated tests. Remove it from .env.');
-const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const IS_PROD = process.env.NODE_ENV === 'production';
+
+// The shop's address, e.g. https://vornetic.com. Every link we send out — password reset, order
+// e-mails, Stripe return pages, sitemap — is built from it. Without it the address would come from
+// the request's Host header, which anyone can fake: a password-reset e-mail could then point to
+// someone else's site and hand them the reset token. So in production it is required, must be
+// https:// and must be just the address (no path). In development it is optional.
+//
+// The raw text is checked before anything is normalised (a URL parser would quietly "fix"
+// values like "https:shop.com", "https:\\shop.com" or "https://shop.com?" into something else).
+// Accepted: https://host[:port] with an optional final "/". In development http:// and a
+// one-word host such as localhost are fine too.
+// Problems are reported by kind only: the value is never printed, because a mistyped value can
+// contain a password or token, and server logs are often kept and forwarded.
+const HOST_LABEL = /^(?!-)[a-z0-9-]{1,63}(?<!-)$/;
+function checkPublicUrl(value) {
+  if (!value) return { problem: 'is not set' };
+  if (/[\s\\@\u0000-\u001f\u007f]/.test(value)) return { problem: 'contains a space, backslash, "@" or login details' };
+  if (!/^https?:\/\//i.test(value) || (IS_PROD && !/^https:\/\//i.test(value))) return { problem: 'must start with https://' };
+  const m = /^(https?):\/\/([^/?#:]+)(?::(\d*))?\/?$/i.exec(value);
+  if (!m) return { problem: 'must be only the address: no path, "?", "#" or anything after the host and port' };
+  const [, scheme, rawHost, port] = m;
+  const host = rawHost.toLowerCase(), labels = host.split('.');
+  if (labels.some(l => !HOST_LABEL.test(l)) || (IS_PROD && labels.length < 2)) return { problem: 'has an invalid host name' };
+  if (port !== undefined && (!/^[1-9]\d{0,4}$/.test(port) || Number(port) > 65535)) return { problem: 'has an invalid port' };
+  const defaultPort = scheme.toLowerCase() === 'https' ? '443' : '80';
+  return { url: `${scheme.toLowerCase()}://${host}${port && port !== defaultPort ? ':' + port : ''}` };
+}
+function publicUrl(raw) {
+  const { url, problem } = checkPublicUrl(String(raw ?? '').trim());
+  if (url) return url;
+  if (IS_PROD) {
+    console.error(`✖  PUBLIC_URL ${problem} (value not shown). In production set it in .env to the shop's https address, e.g. PUBLIC_URL=https://vornetic.com`);
+    process.exit(1);
+  }
+  if (problem !== 'is not set') console.warn(`⚠  PUBLIC_URL ${problem} (value not shown); using the address of each request (fine for local testing only).`);
+  return '';
+}
+const PUBLIC_URL = publicUrl(process.env.PUBLIC_URL);
 
 // The default password is public (README, source). In production it never unlocks the panel.
 const ADMIN_LOCKED = IS_PROD && ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD;
@@ -39,14 +76,30 @@ const countries = s => ALL_COUNTRIES.filter(c => c !== 'PT' || s.ship_pt_on !== 
 const STATUSES = ['pending', 'paid', 'shipped', 'delivered', 'cancelled'];
 
 app.disable('x-powered-by');
-app.set('trust proxy', 1);
+// Nginx runs on the same server (README, docs/nginx-vornetic.conf). Only a request coming from this
+// machine may tell us via X-Forwarded-Proto / X-Forwarded-For that the visitor used https and what
+// their IP is; a request from anywhere else can't fake those headers (they are ignored).
+app.set('trust proxy', 'loopback');
 app.use((req, res, next) => {
   res.set({
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'SAMEORIGIN',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
+    // In production: browsers must use https for this site for the next year (only this host,
+    // not subdomains, so a mail or other subdomain without https keeps working)
+    ...(IS_PROD && { 'Strict-Transport-Security': 'max-age=31536000' }),
   });
   next();
+});
+// Production: customer data only over https. Nginx itself redirects port 80 to https, so normally
+// no plain-http request arrives here. If one still does (port 80 proxied by mistake, or the app
+// reached directly), pages are redirected to the https address, and everything else — login,
+// checkout, admin — is refused without being processed, so it has to be sent again over https.
+// "https" is only believed when Nginx on this machine says so (trust proxy above).
+if (IS_PROD) app.use((req, res, next) => {
+  if (req.secure) return next();
+  if (req.method === 'GET' || req.method === 'HEAD') return res.redirect(301, PUBLIC_URL + req.originalUrl);
+  res.status(403).json({ error: 'HTTPS required' });
 });
 app.use(express.json({ limit: '200kb' }));
 app.use(cookieParser());
@@ -54,6 +107,15 @@ app.use(express.static(path.join(__dirname, 'public'), { index: false, maxAge: I
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
 
 // ---------- Uploads (photos and videos, admin only) ----------
+// One file per request, so every upload request has a small, known maximum size: the admin page
+// sends a selection of several files one after another. Nginx must accept one full-size video plus
+// the form overhead: client_max_body_size 81m in docs/nginx-vornetic.conf (checked by a test).
+const MAX_VIDEO_MB = 80, MAX_PHOTO_MB = 12;
+const MAX_VIDEO_BYTES = MAX_VIDEO_MB * 1024 * 1024, MAX_PHOTO_BYTES = MAX_PHOTO_MB * 1024 * 1024;
+// Multer's own limit is set a little ABOVE the maximum and the exact maximum is checked below on the
+// finished file: Multer 2.0–2.2 rejected a file of exactly limits.fileSize bytes (2.3+ accepts it),
+// so this way a video of exactly 80 MB is accepted whatever Multer version is installed.
+const MULTER_FILE_LIMIT = MAX_VIDEO_BYTES + 1024;
 const IMG_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
 const VID_EXT = ['.mp4', '.webm'];
 const upload = multer({
@@ -62,7 +124,7 @@ const upload = multer({
     filename: (req, file, cb) =>
       cb(null, crypto.randomBytes(8).toString('hex') + path.extname(file.originalname).toLowerCase()),
   }),
-  limits: { fileSize: 80 * 1024 * 1024, files: 20 },
+  limits: { fileSize: MULTER_FILE_LIMIT, files: 1 },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const ok = IMG_EXT.includes(ext) || VID_EXT.includes(ext);
@@ -107,6 +169,8 @@ function shippingFor(zone, subtotal, s) {
   const fee = zone === 'ib' ? n('ship_ib_cents') : n('ship_pt_cents');
   return n('free_far_cents') && subtotal >= n('free_far_cents') ? 0 : fee;
 }
+// Links we send out. In production PUBLIC_URL is always set (see publicUrl above), so the Host
+// header is only used in local development.
 const baseUrl = req => PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
 
 // Validate a car chosen in the store against data/cars.txt
@@ -546,6 +610,7 @@ app.post('/api/admin/logout', (req, res) => {
 app.get('/api/admin/me', requireAdmin, (req, res) => res.json({
   ok: true, stripe: !!STRIPE_KEY, mail: mail.enabled,
   open_withdrawals: db.prepare('SELECT COUNT(*) c FROM withdrawals WHERE handled = 0').get().c,
+  upload: { photo_mb: MAX_PHOTO_MB, video_mb: MAX_VIDEO_MB, photo_ext: IMG_EXT, video_ext: VID_EXT },
 }));
 app.post('/api/admin/test-mail', requireAdmin, async (req, res) => {
   if (!mail.enabled) return res.status(400).json({ error: 'E-posta ayarlı değil (SMTP_* ortam değişkenleri)' });
@@ -601,11 +666,16 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
 });
 
 // Uploads: returns [{ type, src }]
-app.post('/api/admin/upload', requireAdmin, upload.array('files', 20), (req, res) => {
+app.post('/api/admin/upload', requireAdmin, upload.array('files', 1), (req, res) => {
   const out = [];
   for (const f of req.files || []) {
     const isVideo = VID_EXT.includes(path.extname(f.filename));
-    if (!isVideo && f.size > 12 * 1024 * 1024) { fs.unlinkSync(f.path); continue; }   // photos max 12 MB
+    // The exact maximum, on the finished file (Multer's limit is a little higher, see MULTER_FILE_LIMIT)
+    if (isVideo && f.size > MAX_VIDEO_BYTES) {
+      fs.unlinkSync(f.path);
+      return res.status(400).json({ error: `File too large — video en fazla ${MAX_VIDEO_MB} MB` });
+    }
+    if (!isVideo && f.size > MAX_PHOTO_BYTES) { fs.unlinkSync(f.path); continue; }   // photos max 12 MB
     out.push({ type: isVideo ? 'video' : 'image', src: '/uploads/' + f.filename });
   }
   res.json({ ok: true, media: out });
@@ -985,7 +1055,10 @@ app.get(/^\/(?!api|uploads).*/, (req, res) => {
 backup();
 setInterval(backup, 6 * 3600 * 1000).unref();
 
-const server = app.listen(PORT, () => {
+// In production listen on this machine only: visitors reach the app through Nginx (https), never
+// directly over plain http. HOST can override it (e.g. HOST=0.0.0.0), but read the README first.
+const HOST = process.env.HOST || (IS_PROD ? '127.0.0.1' : undefined);
+const server = app.listen(PORT, HOST, () => {
   // Only once the port is ours: a start that fails (e.g. EADDRINUSE because another instance
   // is running on the same data) must not log out that instance's admins.
   revokeAdminSessions();
