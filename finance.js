@@ -115,11 +115,15 @@ function cleanEntry(b) {
 
 // ---------- CSV ----------
 // Our files use ";" (what Excel expects in Spain/Turkey), a UTF-8 BOM so Excel shows accents,
-// and comma decimals. Text that starts like a formula gets a leading ' so Excel shows it as text.
-const FORMULA_START = /^[=+\-@\t\r]/;
+// and comma decimals. Text that starts like a formula (= + - @, tab, CR) gets a leading ' so a
+// spreadsheet shows it as text instead of running it. Text that already starts with ' gets one
+// too, so the import can always remove exactly one ' and get the original back:
+//   "=SUM(A1)" → "'=SUM(A1)" → "=SUM(A1)"      "'quoted" → "''quoted" → "'quoted"
+const ESCAPE_START = /^[=+\-@\t\r']/;
+const FORMULA_START = /^[=+\-@]/;
 function csvCell(v) {
   let s = String(v ?? '');
-  if (FORMULA_START.test(s)) s = "'" + s;
+  if (ESCAPE_START.test(s)) s = "'" + s;
   return /[;"\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 const csvAmount = cents => (cents / 100).toFixed(2).replace('.', ',');
@@ -175,11 +179,13 @@ const MAX_IMPORT_ROWS = 500;
 // - without one: every field the same (type, date, amount, category, note, party, country)
 // Same amount on the same day alone is NOT enough: two real Wallapop sales of 45,90 € with
 // different buyers or notes are both kept.
+// The key is a JSON array, so a "|" (or any character) inside a note or name can't make two
+// different rows look the same: ["a|b","c"] and ["a","b|c"] stay different.
 function entryKey(e) {
   const t = s => norm(s);
-  return e.reference
-    ? ['ref', e.kind, e.date, e.amount_cents, t(e.reference)].join('|')
-    : ['row', e.kind, e.date, e.amount_cents, e.category, t(e.note), t(e.party), t(e.country)].join('|');
+  return JSON.stringify(e.reference
+    ? ['ref', e.kind, e.date, e.amount_cents, t(e.reference)]
+    : ['row', e.kind, e.date, e.amount_cents, e.category, t(e.note), t(e.party), t(e.country)]);
 }
 
 // Turns uploaded CSV text into entries. Nothing is trusted: every row is validated, formula-like
@@ -221,8 +227,15 @@ function readImport(text, savedCount, similarSaved = () => false) {
       out.ignored.push({ line, reason: 'Web sitesi satırı: web satışları siparişlerden otomatik gelir' });
       continue;
     }
-    const texts = ['note', 'party', 'reference', 'country', 'category', 'source'].map(get);
-    if (texts.some(t => /^[=+\-@]/.test(t))) { fail('Formül gibi başlayan metin (=, +, -, @) kabul edilmez'); continue; }
+    // Text cells: a leading ' is the spreadsheet "this is text" marker (our export adds it) and is
+    // removed once. Without it, text starting like a formula could be a live formula: refused.
+    const text = {};
+    for (const k of ['note', 'party', 'reference', 'country', 'category', 'source']) {
+      const raw = get(k);
+      text[k] = raw.startsWith("'") ? raw.slice(1) : raw;
+      if (FORMULA_START.test(raw)) text.formula = true;
+    }
+    if (text.formula) { fail('Formül gibi başlayan metin (=, +, -, @) kabul edilmez; metinse başına \' koy'); continue; }
     const kind = kindFromText(rawKind);
     if (!kind) { fail(`Tür anlaşılmadı: "${clean(rawKind, 30)}" (gelir / gider)`); continue; }
     const date = parseDate(get('date'));
@@ -231,13 +244,13 @@ function readImport(text, savedCount, similarSaved = () => false) {
     if (amount === null || amount <= 0 || amount > MAX_CENTS) { fail(`Tutar anlaşılmadı: "${clean(get('amount'), 30)}" (ör. 12,50)`); continue; }
     const cur = norm(get('currency'));
     if (cur && cur !== 'eur' && cur !== '€') { fail(`Sadece EUR destekleniyor (${clean(get('currency'), 10)})`); continue; }
-    const catText = kind === 'income' && get('source') ? get('source') : (get('category') || get('source'));
+    const catText = kind === 'income' && text.source ? text.source : (text.category || text.source);
     const category = categoryFromText(kind, catText);
     if (!category) { fail(`Kategori anlaşılmadı: "${clean(catText, 40)}"`); continue; }
     let entry;
     try {
       entry = cleanEntry({ kind, date, amount_cents: amount, category,
-        note: get('note'), party: get('party'), reference: get('reference'), country: get('country') });
+        note: text.note, party: text.party, reference: text.reference, country: text.country });
     } catch (e) { fail(e.message); continue; }
     const key = entryKey(entry);
     const nth = (inFile.get(key) || 0) + 1;          // this is the nth such row in the file

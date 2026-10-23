@@ -190,6 +190,11 @@ CREATE TABLE IF NOT EXISTS finance_entries (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_finance_date ON finance_entries(date);
+
+-- The Finance tab asks "which payments / refunds fall in this month?" 13 times per page load;
+-- these indexes let SQLite jump to the month instead of reading the whole history each time.
+CREATE INDEX IF NOT EXISTS idx_orders_paid_at ON orders(paid_at);
+CREATE INDEX IF NOT EXISTS idx_refunds_created ON refunds(created_at);
 `);
 db.exec('CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id)');
 
