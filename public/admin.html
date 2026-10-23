@@ -19,6 +19,19 @@
   .stats b { display:block; font-size:24px; font-weight:600; }
   .stats span { color:var(--muted); font-size:13px; }
   @media (max-width:800px){ .stats{grid-template-columns:1fr 1fr;} }
+  .stats.fin-stats { grid-template-columns:repeat(3,1fr); }
+  .section-head.fin-head { flex-wrap:wrap; align-items:center; }
+  @media (max-width:560px){
+    .stats.fin-stats { grid-template-columns:1fr 1fr; gap:8px; }
+    .stats.fin-stats div { padding:12px; }
+    .stats.fin-stats b { font-size:20px; }
+    .stats.fin-stats div:last-child { grid-column:1 / -1; }
+  }
+  .fin-tools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .fin-tools .in[type=month] { width:auto; }
+  .fin-row { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; border-bottom:1px solid var(--line); }
+  .fin-row:last-child { border-bottom:0; }
+  .fin-in { color:var(--ok); } .fin-out { color:var(--bad); }
   table { width:100%; border-collapse:collapse; font-size:14px; }
   th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
   th { color:var(--muted); font-weight:500; }

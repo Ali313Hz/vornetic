@@ -40,7 +40,7 @@ function toast(msg) {
 
 const STATUS = { pending: 'Ödeme bekliyor', paid: 'Ödendi — gönderilecek', shipped: 'Kargoda', delivered: 'Teslim edildi', cancelled: 'İptal' };
 const PAY = { card: 'Kart (Stripe)', bizum: 'Bizum', transfer: 'Havale', contact: 'İletişimle ödeme' };
-const TABS = { orders: 'Siparişler', customers: 'Müşteriler', withdrawals: 'Cayma', products: 'Ürünler', categories: 'Kategoriler', bulbs: 'Ampuller', stats: 'Özet', settings: 'Ayarlar' };
+const TABS = { orders: 'Siparişler', customers: 'Müşteriler', withdrawals: 'Cayma', products: 'Ürünler', categories: 'Kategoriler', bulbs: 'Ampuller', finance: 'Finans', stats: 'Özet', settings: 'Ayarlar' };
 let ME = {};
 let tab = 'orders';
 
@@ -74,7 +74,7 @@ $('#logout').addEventListener('click', async () => { await send('/api/admin/logo
 function show() {
   root.innerHTML = '<p class="muted">Yükleniyor…</p>';
   window.scrollTo(0, 0);
-  ({ orders: viewOrders, customers: viewCustomers, withdrawals: viewWithdrawals, products: viewProducts, categories: viewCategories, bulbs: viewBulbs, stats: viewStats, settings: viewSettings })[tab]().catch(e => {
+  ({ orders: viewOrders, customers: viewCustomers, withdrawals: viewWithdrawals, products: viewProducts, categories: viewCategories, bulbs: viewBulbs, finance: viewFinance, stats: viewStats, settings: viewSettings })[tab]().catch(e => {
     root.innerHTML = `<p class="notice err">${esc(e.message)}</p>`;
   });
 }
@@ -692,6 +692,177 @@ function editProduct(src) {
 }
 
 /* ---------- Özet ---------- */
+/* ---------- Finans ---------- */
+// Simple income / expense overview per month. Website money comes from orders automatically;
+// everything else is added here or imported from CSV. All amounts in EUR.
+let finMonth = new Date().toISOString().slice(0, 7), finSearch = '';
+const FIN_LAST = 'vn-fin-last';     // last category used per type (only in this browser)
+const lastCat = kind => { try { return JSON.parse(localStorage.getItem(FIN_LAST) || '{}')[kind]; } catch { return null; } };
+const rememberCat = (kind, cat) => {
+  try { const m = JSON.parse(localStorage.getItem(FIN_LAST) || '{}'); m[kind] = cat; localStorage.setItem(FIN_LAST, JSON.stringify(m)); } catch { /* private mode */ }
+};
+const monthName = m => new Date(m + '-15T00:00:00Z').toLocaleDateString('tr-TR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+const FIN_SAMPLE = '﻿type;date;amount_eur;category;note;country;party;reference\r\n'
+  + 'gelir;2026-10-05;45,90;Wallapop;Xenon D1S;ES;;\r\ngelir;2026-10-07;320,00;Toptan;10 set LED;PT;Auto Lisboa;F-2026-12\r\n'
+  + 'gider;2026-10-01;150,00;Depo / kira;Ekim kirası;ES;;\r\ngider;2026-10-10;60,50;Gestor / muhasebeci;;ES;Gestoría;\r\n';
+
+async function viewFinance() {
+  const d = await api('/api/admin/finance?month=' + finMonth);
+  const C = d.categories;
+  const catName = (kind, k) => C[kind][k] || k;
+  const right = 'style="text-align:right;white-space:nowrap"';
+  const w = d.warnings;
+  const notes = [
+    w.needs_refund && `${w.needs_refund} iptal siparişte iade eksik (Siparişler'de ⚠ ile işaretli).`,
+    w.payment_unknown && `${w.payment_unknown} eski iptal siparişin ödeme durumu bilinmiyor; cevaplanana kadar gelire sayılmaz.`,
+    d.web.estimated_dates && `Bu ayın ${d.web.estimated_dates} web ödemesinin tarihi tahmini (eski sipariş tarihi).`,
+  ].filter(Boolean);
+  root.innerHTML = `
+    <div class="section-head fin-head"><h2>Finans</h2>
+      <div class="fin-tools">
+        <input class="in" type="month" id="fm" value="${d.month}" aria-label="Ay">
+        <a class="btn ghost sm" href="/api/admin/finance/export.csv?month=${d.month}" download>CSV indir (bu ay)</a>
+        <a class="btn ghost sm" href="/api/admin/finance/export.csv" download>CSV indir (tümü)</a>
+        <label class="btn ghost sm" style="cursor:pointer">CSV içe aktar<input type="file" id="fimp" accept=".csv,text/csv" hidden></label>
+        <button class="btn ghost sm" id="fsample">Örnek CSV</button>
+      </div></div>
+    <div class="stats fin-stats">
+      <div><b>${eur(d.income_cents)}</b><span>Toplam gelir · ${esc(monthName(d.month))}</span></div>
+      <div><b>${eur(d.expense_cents)}</b><span>Toplam gider</span></div>
+      <div><b style="color:${d.balance_cents < 0 ? 'var(--bad)' : 'var(--ok)'}">${eur(d.balance_cents)}</b><span>Kalan (tahmini)</span></div>
+    </div>
+    <p class="muted small" style="margin-top:-12px">Yönetim tahmini — resmi kâr veya vergi hesabı değildir. Ürün maliyetleri ve vergiler gider olarak girilmedikçe "kalan" kâr demek değildir.</p>
+    ${notes.length ? `<p class="notice">${notes.map(esc).join('<br>')}</p>` : ''}
+    <div class="fin-tools" style="margin:14px 0"><button class="btn" id="addInc">+ Gelir ekle</button><button class="btn" id="addExp">+ Gider ekle</button></div>
+    <div id="fform"></div><div id="fimpres"></div>
+    <div class="grid2">
+      <div class="box"><h3>Gelir</h3><table>
+        <tr><td>Web sitesi ödemeleri <span class="muted small">(${d.web.orders} sipariş · kargo ${eur(d.web.shipping_cents)} dahil)</span></td><td ${right}>${eur(d.web.payments_cents)}</td></tr>
+        <tr><td>Web sitesi iadeleri <span class="muted small">(${d.web.refunds})</span></td><td ${right}>− ${eur(d.web.refunds_cents)}</td></tr>
+        ${d.manual_income.map(r => `<tr><td>${esc(catName('income', r.category))} <span class="muted small">(${r.n})</span></td><td ${right}>${eur(r.total_cents)}</td></tr>`).join('')}
+        <tr><th>Toplam</th><th ${right}>${eur(d.income_cents)}</th></tr></table>
+        <p class="muted small" style="margin-bottom:0">Web satışları siparişlerden otomatik gelir (ödeme günü); iadeler iade gününde düşülür. Buradan eklenemez, böylece iki kez sayılmaz.</p></div>
+      <div class="box"><h3>Gider</h3>
+        ${d.expenses.length ? `<table>${d.expenses.map(r => `<tr><td>${esc(catName('expense', r.category))} <span class="muted small">(${r.n})</span></td><td ${right}>${eur(r.total_cents)}</td></tr>`).join('')}
+          <tr><th>Toplam</th><th ${right}>${eur(d.expense_cents)}</th></tr></table>` : '<p class="muted small">Bu ay gider yok.</p>'}</div>
+    </div>
+    <div class="section-head" style="margin:8px 0 10px"><h3 style="margin:0">Kayıtlar · ${esc(monthName(d.month))} (${d.entries.length})</h3>
+      <input class="in search" id="fq" placeholder="Ara: not, kişi, referans" value="${esc(finSearch)}" style="max-width:260px"></div>
+    <div class="table-wrap" id="flist"></div>
+    <div class="box" style="margin-top:16px"><h3>Son 12 ay</h3><div style="overflow-x:auto"><table>
+      <tr><th>Ay</th><th ${right}>Gelir</th><th ${right}>Gider</th><th ${right}>Kalan</th></tr>
+      ${d.months.map(m => `<tr class="click" data-m="${m.month}"><td>${esc(monthName(m.month))}</td><td ${right}>${eur(m.income_cents)}</td>
+        <td ${right}>${eur(m.expense_cents)}</td><td ${right}>${eur(m.balance_cents)}</td></tr>`).join('')}</table></div></div>`;
+
+  const drawList = () => {
+    const q = finSearch.toLowerCase();
+    const list = q ? d.entries.filter(e => [e.note, e.party, e.reference, e.country, catName(e.kind, e.category)].join(' ').toLowerCase().includes(q)) : d.entries;
+    $('#flist').innerHTML = list.length ? list.map(e => `<div class="fin-row" data-id="${e.id}">
+      <div><b class="${e.kind === 'income' ? 'fin-in' : 'fin-out'}">${e.kind === 'income' ? '+' : '−'} ${eur(e.amount_cents)}</b>
+        <span class="muted">· ${esc(e.date)} · ${esc(catName(e.kind, e.category))}</span>
+        ${[e.note, e.party, e.reference, e.country].some(Boolean) ? `<br><small>${[e.note, e.party, e.reference && 'Ref ' + e.reference, e.country].filter(Boolean).map(esc).join(' · ')}</small>` : ''}</div>
+      <div class="fin-tools"><button class="chip-btn small" data-act="edit">Düzenle</button><button class="chip-btn small" data-act="copy">Tekrarla</button>
+        <button class="chip-btn small" data-act="del">Sil</button></div></div>`).join('')
+      : `<p class="muted" style="padding:12px;margin:0">${q ? 'Eşleşen kayıt yok.' : 'Bu ay elle eklenmiş kayıt yok.'}</p>`;
+    $$('.fin-row', $('#flist')).forEach(row => {
+      const e = d.entries.find(x => x.id === +row.dataset.id);
+      $$('[data-act]', row).forEach(b => b.addEventListener('click', async () => {
+        if (b.dataset.act === 'edit') return financeForm(e.kind, C, e);
+        if (b.dataset.act === 'copy') return financeForm(e.kind, C, { ...e, id: undefined, date: new Date().toISOString().slice(0, 10) });
+        if (!confirm(`Bu kayıt silinsin mi?\n${e.kind === 'income' ? 'Gelir' : 'Gider'} · ${e.date} · ${catName(e.kind, e.category)} · ${eur(e.amount_cents)}`)) return;
+        try { await api('/api/admin/finance/entries/' + e.id, { method: 'DELETE' }); toast('Silindi'); show(); }
+        catch (err) { toast(err.message); }
+      }));
+    });
+  };
+  drawList();
+  $('#fq').addEventListener('input', e => { finSearch = e.target.value; drawList(); });
+  $('#fm').addEventListener('change', e => { if (e.target.value) { finMonth = e.target.value; show(); } });
+  $$('tr[data-m]').forEach(tr => tr.addEventListener('click', () => { finMonth = tr.dataset.m; show(); }));
+  $('#addInc').addEventListener('click', () => financeForm('income', C));
+  $('#addExp').addEventListener('click', () => financeForm('expense', C));
+  $('#fsample').addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([FIN_SAMPLE], { type: 'text/csv' }));
+    a.download = 'vornetic-finans-ornek.csv'; a.click(); URL.revokeObjectURL(a.href);
+  });
+  $('#fimp').addEventListener('change', e => { const file = e.target.files[0]; e.target.value = ''; if (file) financeImport(file, C); });
+}
+
+// Add / edit form: amount, category and date are enough; the rest is optional ("Daha fazla")
+function financeForm(kind, C, e = {}) {
+  const editing = !!e.id;
+  const cat = e.category || lastCat(kind) || Object.keys(C[kind])[0];
+  const more = [e.country, e.party, e.reference].some(Boolean);
+  $('#fform').innerHTML = `<form class="box" id="ff">
+    <h3>${editing ? 'Kaydı düzenle' : kind === 'income' ? 'Gelir ekle' : 'Gider ekle'}</h3>
+    <div class="grid2">
+      <label class="f"><span>Tutar (€)</span><input class="in" name="amount" inputmode="decimal" placeholder="ör. 12,50" required
+        value="${e.amount_cents ? (e.amount_cents / 100).toFixed(2).replace('.', ',') : ''}"></label>
+      <label class="f"><span>${kind === 'income' ? 'Kaynak' : 'Kategori'}</span><select class="in" name="category">
+        ${Object.entries(C[kind]).map(([k, l]) => `<option value="${k}"${k === cat ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+    </div>
+    <div class="grid2">
+      <label class="f"><span>Tarih</span><input class="in" type="date" name="date" required value="${esc(e.date || new Date().toISOString().slice(0, 10))}"></label>
+      <label class="f"><span>Not (isteğe bağlı)</span><input class="in" name="note" maxlength="300" value="${esc(e.note)}"></label>
+    </div>
+    <details${more ? ' open' : ''}><summary class="small muted" style="cursor:pointer;margin-bottom:10px">Daha fazla: ülke, ${kind === 'income' ? 'alıcı' : 'tedarikçi'}, fatura no</summary>
+      <div class="grid2">
+        <label class="f"><span>Ülke (ES, PT, FR…)</span><input class="in" name="country" maxlength="2" value="${esc(e.country)}"></label>
+        <label class="f"><span>${kind === 'income' ? 'Alıcı / firma' : 'Tedarikçi'}</span><input class="in" name="party" maxlength="120" value="${esc(e.party)}"></label>
+      </div>
+      <label class="f"><span>Fatura / referans no</span><input class="in" name="reference" maxlength="60" value="${esc(e.reference)}"></label>
+    </details>
+    <div class="fin-tools"><button class="btn">${editing ? 'Kaydet' : 'Ekle'}</button><button type="button" class="btn ghost" id="fcancel">Vazgeç</button></div>
+  </form>`;
+  const f = $('#ff');
+  f.amount.focus();
+  f.scrollIntoView({ block: 'nearest' });
+  $('#fcancel').addEventListener('click', () => { $('#fform').innerHTML = ''; });
+  f.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const cents = parseEuro(f.amount.value);
+    if (!cents) return toast('Geçersiz tutar — örnek: 12,50');
+    const body = { kind, amount_cents: cents, category: f.category.value, date: f.date.value,
+      note: f.note.value, country: f.country.value, party: f.party.value, reference: f.reference.value };
+    try {
+      const r = editing ? await send('/api/admin/finance/entries/' + e.id, body) : await send('/api/admin/finance/entries', body, 'POST');
+      rememberCat(kind, body.category);
+      toast(r.possible_duplicate ? 'Kaydedildi — dikkat: aynı gün, tutar ve kategoride başka kayıt da var' : 'Kaydedildi');
+      finMonth = body.date.slice(0, 7);
+      show();
+    } catch (err) { toast(err.message); }
+  });
+}
+
+// CSV import: first a preview (nothing saved), then one click saves all rows — or none, if any row has an error
+async function financeImport(file, C) {
+  const box = $('#fimpres');
+  if (file.size > 120 * 1024) { box.innerHTML = '<p class="notice err">Dosya çok büyük (en fazla 120 KB / 500 satır). Dosyayı böl.</p>'; return; }
+  const csv = await file.text();
+  let r;
+  try { r = await send('/api/admin/finance/import', { csv, dry_run: true }, 'POST'); }
+  catch (err) { box.innerHTML = `<p class="notice err">${esc(err.message)}</p>`; return; }
+  const list = (items, fmt) => items.length ? `<ul class="small" style="margin:6px 0 0;padding-left:18px">${items.slice(0, 30).map(x => `<li>${fmt(x)}</li>`).join('')}${items.length > 30 ? `<li>… +${items.length - 30}</li>` : ''}</ul>` : '';
+  box.innerHTML = `<div class="box"><h3>İçe aktarma önizlemesi · ${esc(file.name)}</h3>
+    <p style="margin:0">Eklenecek: <b>${r.add_count}</b> · Tekrar (atlanır): <b>${r.duplicates.length}</b> · Web satırı (atlanır): <b>${r.ignored.length}</b> · Hata: <b style="color:${r.errors.length ? 'var(--bad)' : 'inherit'}">${r.errors.length}</b></p>
+    ${r.errors.length ? `<p class="notice err" style="margin-top:10px">Hataları dosyada düzeltip tekrar yükle — hata varken hiçbir satır kaydedilmez.${list(r.errors, x => `Satır ${x.line}: ${esc(x.msg)}`)}</p>` : ''}
+    ${r.warnings.length ? `<p class="notice" style="margin-top:10px">${r.warnings.map(esc).join('<br>')}</p>` : ''}
+    ${list(r.duplicates, x => `Satır ${x.line}: ${esc(x.reason)}`)}
+    ${r.add.length ? `<div class="table-wrap" style="margin-top:10px"><table><tr><th>Satır</th><th>Tür</th><th>Tarih</th><th>Kategori</th><th style="text-align:right">Tutar</th><th>Not</th></tr>
+      ${r.add.slice(0, 20).map(x => `<tr><td>${x.line}</td><td>${x.kind === 'income' ? 'Gelir' : 'Gider'}</td><td>${esc(x.date)}</td><td>${esc(C[x.kind][x.category] || x.category)}</td>
+        <td style="text-align:right">${eur(x.amount_cents)}</td><td>${esc(x.note)}</td></tr>`).join('')}</table></div>
+      ${r.add.length > 20 ? `<p class="muted small">… ve ${r.add.length - 20} satır daha</p>` : ''}` : ''}
+    <div class="fin-tools" style="margin-top:12px">
+      ${!r.errors.length && r.add_count ? `<button class="btn" id="fimpgo">İçe aktar (${r.add_count} kayıt)</button>` : ''}
+      <button class="btn ghost" id="fimpno">Kapat</button></div></div>`;
+  $('#fimpno').addEventListener('click', () => { box.innerHTML = ''; });
+  $('#fimpgo')?.addEventListener('click', async () => {
+    try { const done = await send('/api/admin/finance/import', { csv }, 'POST'); toast(`${done.saved} kayıt eklendi`); show(); }
+    catch (err) { toast(err.message); }
+  });
+}
+
 async function viewStats() {
   const s = await api('/api/admin/stats');
   root.innerHTML = `

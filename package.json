@@ -6,8 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
-    "test": "node --test",
-    "check:syntax": "node --check server.js && node --check db.js && node --check catalog.js && node --check mail.js && node --check stripe.js"
+    "test": "node --test \"test/**/*.test.js\"",
+    "check:syntax": "node --check server.js && node --check db.js && node --check catalog.js && node --check mail.js && node --check stripe.js && node --check finance.js"
   },
   "engines": {
     "node": ">=22.5"
