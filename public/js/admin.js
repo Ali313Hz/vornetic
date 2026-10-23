@@ -695,7 +695,15 @@ function editProduct(src) {
 /* ---------- Finans ---------- */
 // Simple income / expense overview per month. Website money comes from orders automatically;
 // everything else is added here or imported from CSV. All amounts in EUR.
-let finMonth = new Date().toISOString().slice(0, 7), finSearch = '';
+// Today in the shop's calendar (Madrid), "YYYY-MM-DD". Not toISOString(): that is UTC, which is
+// still "yesterday" between midnight and 01:00 (winter) / 02:00 (summer) in Spain. The server
+// groups website money by Madrid months too, so both sides use the same calendar.
+function shopToday(now = new Date()) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(now).map(x => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}`;
+}
+let finMonth = shopToday().slice(0, 7), finSearch = '';
 const FIN_LAST = 'vn-fin-last';     // last category used per type (only in this browser)
 const lastCat = kind => { try { return JSON.parse(localStorage.getItem(FIN_LAST) || '{}')[kind]; } catch { return null; } };
 const rememberCat = (kind, cat) => {
@@ -768,7 +776,7 @@ async function viewFinance() {
       const e = d.entries.find(x => x.id === +row.dataset.id);
       $$('[data-act]', row).forEach(b => b.addEventListener('click', async () => {
         if (b.dataset.act === 'edit') return financeForm(e.kind, C, e);
-        if (b.dataset.act === 'copy') return financeForm(e.kind, C, { ...e, id: undefined, date: new Date().toISOString().slice(0, 10) });
+        if (b.dataset.act === 'copy') return financeForm(e.kind, C, { ...e, id: undefined, date: shopToday() });
         if (!confirm(`Bu kayıt silinsin mi?\n${e.kind === 'income' ? 'Gelir' : 'Gider'} · ${e.date} · ${catName(e.kind, e.category)} · ${eur(e.amount_cents)}`)) return;
         try { await api('/api/admin/finance/entries/' + e.id, { method: 'DELETE' }); toast('Silindi'); show(); }
         catch (err) { toast(err.message); }
@@ -803,7 +811,7 @@ function financeForm(kind, C, e = {}) {
         ${Object.entries(C[kind]).map(([k, l]) => `<option value="${k}"${k === cat ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
     </div>
     <div class="grid2">
-      <label class="f"><span>Tarih</span><input class="in" type="date" name="date" required value="${esc(e.date || new Date().toISOString().slice(0, 10))}"></label>
+      <label class="f"><span>Tarih</span><input class="in" type="date" name="date" required value="${esc(e.date || shopToday())}"></label>
       <label class="f"><span>Not (isteğe bağlı)</span><input class="in" name="note" maxlength="300" value="${esc(e.note)}"></label>
     </div>
     <details${more ? ' open' : ''}><summary class="small muted" style="cursor:pointer;margin-bottom:10px">Daha fazla: ülke, ${kind === 'income' ? 'alıcı' : 'tedarikçi'}, fatura no</summary>

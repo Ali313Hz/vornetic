@@ -170,11 +170,27 @@ const COLUMNS = {
 };
 const MAX_IMPORT_ROWS = 500;
 
+// Which saved entry a row "is", for duplicate detection on import:
+// - with a reference (invoice / order no.): same type, date, amount and reference
+// - without one: every field the same (type, date, amount, category, note, party, country)
+// Same amount on the same day alone is NOT enough: two real Wallapop sales of 45,90 € with
+// different buyers or notes are both kept.
+function entryKey(e) {
+  const t = s => norm(s);
+  return e.reference
+    ? ['ref', e.kind, e.date, e.amount_cents, t(e.reference)].join('|')
+    : ['row', e.kind, e.date, e.amount_cents, e.category, t(e.note), t(e.party), t(e.country)].join('|');
+}
+
 // Turns uploaded CSV text into entries. Nothing is trusted: every row is validated, formula-like
-// text is refused, website rows are skipped, and likely duplicates (same type, date, amount and
-// category — unless both have different references) are skipped instead of counted twice.
-// isDuplicate(entry) checks the database; rows earlier in the same file are checked here.
-function readImport(text, isDuplicate) {
+// text is refused, website rows are skipped, and rows already saved are skipped instead of
+// counted twice. savedCount(key) says how many saved entries have that key. Matching is counted:
+// if the file has a row 3 times and 1 such entry is saved, 2 are added — so importing the same
+// file twice adds nothing, while a file with two genuinely identical sales adds both the first time.
+// similarSaved(entry) says whether a saved entry has the same type, date, amount and category but
+// is not the same record (e.g. one has a reference, the other not): such rows are imported, with a
+// warning in the preview so the admin can check, instead of being silently skipped or doubled.
+function readImport(text, savedCount, similarSaved = () => false) {
   const out = { add: [], duplicates: [], errors: [], ignored: [], warnings: [] };
   const rows = parseCsv(text).filter(r => r.cells.some(c => c.trim() !== ''));
   if (!rows.length) { out.errors.push({ line: 1, msg: 'Dosya boş' }); return out; }
@@ -195,7 +211,8 @@ function readImport(text, isDuplicate) {
     out.errors.push({ line: header.line, msg: `En fazla ${MAX_IMPORT_ROWS} satır; dosyayı böl` });
     return out;
   }
-  const seen = [];
+  const inFile = new Map();      // key → how many times it appeared so far in this file
+  const repeated = new Map();    // key → line numbers, for the "same line twice" warning
   for (const { line, cells } of rows) {
     const get = k => (col[k] === undefined ? '' : String(cells[col[k]] ?? '').trim());
     const fail = msg => out.errors.push({ line, msg });
@@ -222,14 +239,22 @@ function readImport(text, isDuplicate) {
       entry = cleanEntry({ kind, date, amount_cents: amount, category,
         note: get('note'), party: get('party'), reference: get('reference'), country: get('country') });
     } catch (e) { fail(e.message); continue; }
-    const sameAs = e => e.kind === entry.kind && e.date === entry.date && e.amount_cents === entry.amount_cents
-      && e.category === entry.category && !(e.reference && entry.reference && e.reference !== entry.reference);
-    if (isDuplicate(entry) || seen.some(sameAs)) {
-      out.duplicates.push({ line, reason: 'Aynı tür, tarih, tutar ve kategoride kayıt zaten var' });
+    const key = entryKey(entry);
+    const nth = (inFile.get(key) || 0) + 1;          // this is the nth such row in the file
+    inFile.set(key, nth);
+    repeated.set(key, [...(repeated.get(key) || []), line]);
+    if (nth <= savedCount(key)) {
+      out.duplicates.push({ line, reason: entry.reference
+        ? `Bu referansla (${entry.reference}) aynı tarih ve tutarda kayıt zaten var`
+        : 'Tüm alanları aynı olan kayıt zaten var' });
       continue;
     }
-    seen.push(entry);
+    if (similarSaved(entry))
+      out.warnings.push(`Satır ${line}: aynı gün, tutar ve kategoride kayıtlı bir işlem var (referans/not farklı) — aynı işlemse bu satırı sil.`);
     out.add.push({ line, ...entry });
+  }
+  for (const lines of repeated.values()) {
+    if (lines.length > 1) out.warnings.push(`Satır ${lines.join(', ')} birebir aynı — gerçekten ayrı işlemler mi? Değilse fazlasını sil.`);
   }
   return out;
 }
@@ -238,21 +263,49 @@ function readImport(text, isDuplicate) {
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const nextMonth = m => { const [y, mm] = m.split('-').map(Number); return mm === 12 ? `${y + 1}-01` : `${y}-${String(mm + 1).padStart(2, '0')}`; };
 const prevMonth = m => { const [y, mm] = m.split('-').map(Number); return mm === 1 ? `${y - 1}-12` : `${y}-${String(mm - 1).padStart(2, '0')}`; };
-const thisMonth = () => new Date().toISOString().slice(0, 7);
+
+// ---------- Business calendar: Europe/Madrid ----------
+// Website payments and refunds are stored as UTC timestamps ("YYYY-MM-DD HH:MM:SS", by SQLite).
+// The shop's days and months are Madrid's: a payment at 00:30 on 1 April in Madrid is 22:30 UTC on
+// 31 March (summer time) and must count in April. Madrid is UTC+1 in winter and UTC+2 in summer.
+// Manual entries are plain calendar dates and need no conversion.
+const BUSINESS_TZ = 'Europe/Madrid';
+const tzFormat = new Intl.DateTimeFormat('en-US', { timeZone: BUSINESS_TZ, hourCycle: 'h23',
+  year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const tzParts = ms => Object.fromEntries(tzFormat.formatToParts(new Date(ms)).map(p => [p.type, p.value]));
+// Madrid calendar date ("YYYY-MM-DD") of a moment (ms since 1970, default: now)
+function localDate(ms = Date.now()) { const p = tzParts(ms); return `${p.year}-${p.month}-${p.day}`; }
+// SQLite UTC text → Madrid date
+const utcTextToLocalDate = t => localDate(Date.parse(String(t).replace(' ', 'T') + 'Z'));
+// The UTC moment, as SQLite text, at which Madrid's day "YYYY-MM-DD" begins.
+// (Madrid changes clocks at 02:00/03:00, never at midnight, so midnight always exists once.)
+function localDayStartUtc(day) {
+  const wall = Date.parse(day + 'T00:00:00Z');
+  const offset = t => { const p = tzParts(t); return Date.UTC(+p.year, p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - t; };
+  let t = wall - offset(wall);
+  t = wall - offset(t);
+  return new Date(t).toISOString().slice(0, 19).replace('T', ' ');
+}
+// UTC range [from, to) for a Madrid month "YYYY-MM", or everything when month is null
+const utcRange = month => (month
+  ? [localDayStartUtc(month + '-01'), localDayStartUtc(nextMonth(month) + '-01')]
+  : ['0000-01-01', '9999-12-31']);
+const thisMonth = () => localDate().slice(0, 7);
 
 // ---------- Routes ----------
 function register(app, { db, requireAdmin }) {
   const fin = '/api/admin/finance';
   const ENTRY_COLS = 'id, kind, date, amount_cents, category, note, party, reference, country, created_at, updated_at';
 
-  // Money for one month ("YYYY-MM") or for everything (null). Website: payments by payment date,
-  // refunds by refund date (a refund in October of a January sale lowers October).
+  // Money for one Madrid month ("YYYY-MM") or for everything (null). Website: payments by payment
+  // date, refunds by refund date (a refund in October of a January sale lowers October).
   function totals(month) {
     const from = month ? month + '-01' : '0000-01-01', to = month ? nextMonth(month) + '-01' : '9999-12-31';
+    const [utcFrom, utcTo] = utcRange(month);
     const web = db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(total_cents), 0) total, COALESCE(SUM(shipping_cents), 0) shipping,
         COALESCE(SUM(paid_at_estimated), 0) estimated
-      FROM orders WHERE paid_at >= ? AND paid_at < ?`).get(from, to);
-    const refunds = db.prepare('SELECT COUNT(*) n, COALESCE(SUM(amount_cents), 0) total FROM refunds WHERE created_at >= ? AND created_at < ?').get(from, to);
+      FROM orders WHERE paid_at >= ? AND paid_at < ?`).get(utcFrom, utcTo);
+    const refunds = db.prepare('SELECT COUNT(*) n, COALESCE(SUM(amount_cents), 0) total FROM refunds WHERE created_at >= ? AND created_at < ?').get(utcFrom, utcTo);
     const manual = db.prepare(`SELECT kind, category, COUNT(*) n, SUM(amount_cents) total FROM finance_entries
       WHERE date >= ? AND date < ? GROUP BY kind, category ORDER BY total DESC`).all(from, to);
     const sum = kind => manual.filter(r => r.kind === kind).reduce((a, r) => a + r.total, 0);
@@ -287,7 +340,8 @@ function register(app, { db, requireAdmin }) {
     });
   });
 
-  // Same type, date, amount and category already saved (and not told apart by different references)
+  // For the add/edit form only: same type, date, amount and category already saved (not told apart
+  // by different references). It is just a warning — the entry is always saved.
   const findDuplicate = (e, exceptId = 0) => db.prepare(`SELECT id FROM finance_entries
       WHERE kind = ? AND date = ? AND amount_cents = ? AND category = ? AND id != ?
         AND NOT (reference != '' AND ? != '' AND reference != ?) LIMIT 1`)
@@ -325,19 +379,20 @@ function register(app, { db, requireAdmin }) {
   app.get(fin + '/export.csv', requireAdmin, (req, res) => {
     const month = MONTH_RE.test(req.query.month || '') ? req.query.month : null;
     const from = month ? month + '-01' : '0000-01-01', to = month ? nextMonth(month) + '-01' : '9999-12-31';
+    const [utcFrom, utcTo] = utcRange(month);
     const label = (kind, cat) => CATEGORIES[kind]?.[cat] || cat;
     const rows = [['id', 'type', 'date', 'amount_eur', 'category', 'note', 'country', 'party', 'reference']];
     const list = [
       ...db.prepare(`SELECT ${ENTRY_COLS} FROM finance_entries WHERE date >= ? AND date < ?`).all(from, to)
         .map(e => ({ sort: e.date, row: [e.id, e.kind === 'income' ? 'gelir' : 'gider', e.date, csvAmount(e.amount_cents),
           label(e.kind, e.category), e.note, e.country, e.party, e.reference] })),
-      ...db.prepare('SELECT ref, paid_at, total_cents, country FROM orders WHERE paid_at >= ? AND paid_at < ?').all(from, to)
-        .map(o => ({ sort: o.paid_at.slice(0, 10), row: ['', 'web_sale', o.paid_at.slice(0, 10), csvAmount(o.total_cents),
-          'web', 'Web sitesi siparişi', o.country, '', o.ref] })),
+      ...db.prepare('SELECT ref, paid_at, total_cents, country FROM orders WHERE paid_at >= ? AND paid_at < ?').all(utcFrom, utcTo)
+        .map(o => { const day = utcTextToLocalDate(o.paid_at); return { sort: day, row: ['', 'web_sale', day, csvAmount(o.total_cents),
+          'web', 'Web sitesi siparişi', o.country, '', o.ref] }; }),
       ...db.prepare(`SELECT r.created_at, r.amount_cents, o.ref, o.country FROM refunds r JOIN orders o ON o.id = r.order_id
-          WHERE r.created_at >= ? AND r.created_at < ?`).all(from, to)
-        .map(r => ({ sort: r.created_at.slice(0, 10), row: ['', 'web_refund', r.created_at.slice(0, 10), csvAmount(r.amount_cents),
-          'web', 'Web sitesi iadesi', r.country, '', r.ref] })),
+          WHERE r.created_at >= ? AND r.created_at < ?`).all(utcFrom, utcTo)
+        .map(r => { const day = utcTextToLocalDate(r.created_at); return { sort: day, row: ['', 'web_refund', day, csvAmount(r.amount_cents),
+          'web', 'Web sitesi iadesi', r.country, '', r.ref] }; }),
     ].sort((a, b) => a.sort.localeCompare(b.sort));
     res.set({
       'Content-Type': 'text/csv; charset=utf-8',
@@ -352,8 +407,10 @@ function register(app, { db, requireAdmin }) {
   app.post(fin + '/import', requireAdmin, (req, res) => {
     const b = req.body || {};
     if (typeof b.csv !== 'string' || !b.csv.trim()) return res.status(400).json({ error: 'CSV dosyası boş' });
+    const saved = new Map();
+    for (const e of db.prepare(`SELECT ${ENTRY_COLS} FROM finance_entries`).all()) saved.set(entryKey(e), (saved.get(entryKey(e)) || 0) + 1);
     let result;
-    try { result = readImport(b.csv, e => !!findDuplicate(e)); }
+    try { result = readImport(b.csv, key => saved.get(key) || 0, e => !!findDuplicate(e)); }
     catch (e) { return res.status(400).json({ error: e.message }); }
     const summary = { ...result, add_count: result.add.length };
     if (b.dry_run || result.errors.length) return res.status(result.errors.length && !b.dry_run ? 400 : 200).json({ ok: !result.errors.length, saved: 0, ...summary });
@@ -365,4 +422,5 @@ function register(app, { db, requireAdmin }) {
   });
 }
 
-module.exports = { CATEGORIES, parseAmount, parseDate, cleanEntry, parseCsv, toCsv, csvCell, readImport, register, MAX_IMPORT_ROWS };
+module.exports = { CATEGORIES, parseAmount, parseDate, cleanEntry, parseCsv, toCsv, csvCell, readImport, entryKey, register, MAX_IMPORT_ROWS,
+  BUSINESS_TZ, localDate, localDayStartUtc, utcTextToLocalDate };

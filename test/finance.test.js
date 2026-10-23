@@ -8,8 +8,9 @@ const { DatabaseSync } = require('node:sqlite');
 const { startServer, tempDir, oldDatabase } = require('./helpers');
 const finance = require('../finance');
 
-const thisMonth = () => new Date().toISOString().slice(0, 7);
-const today = () => new Date().toISOString().slice(0, 10);
+// The shop's calendar is Madrid's (the server groups by it), so "today" here is Madrid's too
+const today = () => finance.localDate();
+const thisMonth = () => today().slice(0, 7);
 const FIN = '/api/admin/finance';
 const entry = (over = {}) => ({ kind: 'expense', date: today(), amount_cents: 15000, category: 'storage', ...over });
 
@@ -279,22 +280,129 @@ test('import: one bad row means nothing is saved, and each error names its line'
   } finally { await srv.stop(); }
 });
 
-test('import: duplicates inside the file and against saved entries; references tell entries apart', async () => {
+// Codex P1 (c4e78af): same type, date, amount and category is not enough to call a row a duplicate
+test('import: two real same-amount sales are both kept; importing the file again adds nothing', async () => {
   const srv = await startServer();
   try {
-    await srv.admin('POST', FIN + '/entries', { kind: 'income', amount_cents: 32000, category: 'wholesale', date: '2026-10-07', reference: 'F-1' });
     const csv = [
-      'type;date;amount;source;reference',
-      'gelir;2026-10-07;320;toptan;F-1',      // same as the saved one
-      'gelir;2026-10-07;320;toptan;F-2',      // different invoice: a real second sale
-      'gelir;2026-10-08;50;amazon;',
-      'gelir;2026-10-08;50;amazon;',          // repeated line in the same file
+      'type;date;amount;source;note;party;reference',
+      'gelir;2026-10-08;45,90;Wallapop;Xenon D1S;Buyer One;',      // two different Wallapop sales,
+      'gelir;2026-10-08;45,90;Wallapop;Xenon D2S;Buyer Two;',      // same day and amount, no reference
+      'gelir;2026-10-09;320;toptan;10 set;Garage Test;F-1',
+      'gelir;2026-10-09;320;toptan;10 set;Garage Test;F-2',       // different invoice = different sale
+      'gelir;2026-10-10;50;amazon;;;',
+      'gelir;2026-10-10;50;amazon;;;',                            // fully identical lines: kept, but flagged
     ].join('\n');
-    const r = await srv.admin('POST', FIN + '/import', { csv });
-    assert.deepStrictEqual([r.status, r.body.saved], [200, 2]);
-    assert.deepStrictEqual(r.body.duplicates.map(d => d.line), [2, 5]);
-    assert.deepStrictEqual(r.body.add.map(a => a.reference), ['F-2', '']);
+    let r = await srv.admin('POST', FIN + '/import', { csv });
+    assert.deepStrictEqual([r.status, r.body.saved, r.body.duplicates.length], [200, 6, 0]);
+    assert.ok(r.body.warnings.some(w => /Satır 6, 7 birebir aynı/.test(w)), r.body.warnings.join('\n'));
+    let oct = (await srv.admin('GET', FIN + '?month=2026-10')).body;
+    assert.deepStrictEqual([oct.entries.length, oct.income_cents], [6, 2 * 4590 + 2 * 32000 + 2 * 5000]);
+
+    r = await srv.admin('POST', FIN + '/import', { csv });           // the same file again
+    assert.deepStrictEqual([r.status, r.body.saved, r.body.duplicates.length], [200, 0, 6]);
+    assert.match(r.body.duplicates.find(d => d.line === 4).reason, /referansla \(F-1\)/);
+    assert.match(r.body.duplicates.find(d => d.line === 2).reason, /Tüm alanları aynı/);
+    oct = (await srv.admin('GET', FIN + '?month=2026-10')).body;
+    assert.deepStrictEqual([oct.entries.length, oct.income_cents], [6, 2 * 4590 + 2 * 32000 + 2 * 5000]);
+
+    // A file with one more of the identical Amazon lines adds just that one
+    r = await srv.admin('POST', FIN + '/import', { csv: csv + '\ngelir;2026-10-10;50;amazon;;;' });
+    assert.deepStrictEqual([r.body.saved, r.body.duplicates.length], [1, 6]);
   } finally { await srv.stop(); }
+});
+
+test('import: a reference identifies a record even if its note changed; blank vs reference only warns', async () => {
+  const srv = await startServer();
+  try {
+    await srv.admin('POST', FIN + '/entries', { kind: 'income', amount_cents: 32000, category: 'wholesale', date: '2026-10-07', reference: 'F-9', note: 'old note' });
+    await srv.admin('POST', FIN + '/entries', { kind: 'expense', amount_cents: 6050, category: 'gestor', date: '2026-10-10' });
+    const csv = [
+      'type;date;amount;category;note;reference',
+      'gelir;2026-10-07;320;toptan;note edited in Excel;F-9',     // same invoice → already saved
+      'gider;2026-10-10;60,50;gestor;;FAC-55',                     // saved one has no reference → maybe same
+    ].join('\n');
+    const r = await srv.admin('POST', FIN + '/import', { csv, dry_run: true });
+    assert.deepStrictEqual(r.body.duplicates.map(d => d.line), [2]);
+    assert.deepStrictEqual(r.body.add.map(a => a.line), [3]);
+    assert.ok(r.body.warnings.some(w => /^Satır 3: aynı gün, tutar ve kategoride kayıtlı bir işlem var/.test(w)), r.body.warnings.join('\n'));
+  } finally { await srv.stop(); }
+});
+
+// ---------- Codex P2 (c4e78af): website money by the Madrid calendar ----------
+test('Madrid calendar: day starts across winter, summer and clock changes', () => {
+  const starts = {
+    '2026-02-01': '2026-01-31 23:00:00',   // winter: UTC+1
+    '2026-03-29': '2026-03-28 23:00:00',   // clocks go forward at 02:00 that day
+    '2026-03-30': '2026-03-29 22:00:00',   // summer: UTC+2
+    '2026-04-01': '2026-03-31 22:00:00',
+    '2026-09-01': '2026-08-31 22:00:00',
+    '2026-10-25': '2026-10-24 22:00:00',   // clocks go back at 03:00 that day
+    '2026-11-01': '2026-10-31 23:00:00',
+    '2027-01-01': '2026-12-31 23:00:00',
+  };
+  for (const [day, utc] of Object.entries(starts)) assert.strictEqual(finance.localDayStartUtc(day), utc, day);
+  assert.strictEqual(finance.utcTextToLocalDate('2026-03-31 22:00:00'), '2026-04-01');
+  assert.strictEqual(finance.utcTextToLocalDate('2026-03-31 21:59:59'), '2026-03-31');
+  assert.strictEqual(finance.localDate(Date.parse('2026-07-31T22:30:00Z')), '2026-08-01');
+  assert.strictEqual(finance.localDate(Date.parse('2026-01-31T22:30:00Z')), '2026-01-31');
+  assert.strictEqual(finance.BUSINESS_TZ, 'Europe/Madrid');
+});
+
+test('website payments and refunds fall in the Madrid month, in winter and in summer', async () => {
+  const dir = tempDir();
+  try {
+    // paid_at of old paid orders = their order time (UTC), as stored by SQLite
+    oldDatabase(dir, [
+      { ref: 'VN-W1', status: 'delivered', total: 1000, created_at: '2026-01-31 22:59:59' },   // 31 Jan 23:59:59 Madrid → January
+      { ref: 'VN-W2', status: 'delivered', total: 2000, created_at: '2026-01-31 23:30:00' },   // 1 Feb 00:30 Madrid → February
+      { ref: 'VN-S1', status: 'delivered', total: 4000, created_at: '2026-03-31 21:59:59' },   // 31 Mar 23:59:59 Madrid → March
+      { ref: 'VN-S2', status: 'delivered', total: 8000, created_at: '2026-03-31 22:30:00' },   // 1 Apr 00:30 Madrid → April
+      { ref: 'VN-S3', status: 'delivered', total: 16000, created_at: '2026-08-31 22:10:00' },  // 1 Sep 00:10 Madrid → September
+      { ref: 'VN-O1', status: 'delivered', total: 32000, created_at: '2026-10-31 22:30:00' },  // 31 Oct 23:30 Madrid (winter again) → October
+    ]);
+    let srv = await startServer({}, dir);
+    await srv.stop();                                    // creates the refunds table
+    const db = new DatabaseSync(path.join(dir, 'store.db'));
+    const id = ref => db.prepare('SELECT id FROM orders WHERE ref = ?').get(ref).id;
+    const refund = db.prepare('INSERT INTO refunds (order_id, amount_cents, created_at) VALUES (?, ?, ?)');
+    refund.run(id('VN-W1'), 100, '2026-02-28 23:30:00');   // 1 Mar 00:30 Madrid → March
+    refund.run(id('VN-S3'), 300, '2026-08-31 21:30:00');   // 31 Aug 23:30 Madrid → August
+    db.close();
+
+    srv = await startServer({}, dir);
+    try {
+      const month = async m => (await srv.admin('GET', FIN + '?month=' + m)).body.web;
+      const pay = async m => (await month(m)).payments_cents, ref = async m => (await month(m)).refunds_cents;
+      assert.deepStrictEqual([await pay('2026-01'), await pay('2026-02'), await pay('2026-03'), await pay('2026-04')], [1000, 2000, 4000, 8000]);
+      assert.deepStrictEqual([await pay('2026-08'), await pay('2026-09'), await pay('2026-10'), await pay('2026-11')], [0, 16000, 32000, 0]);
+      assert.deepStrictEqual([await ref('2026-02'), await ref('2026-03'), await ref('2026-08'), await ref('2026-09')], [0, 100, 300, 0]);
+
+      // The CSV export shows the Madrid date and month too
+      const apr = (await srv.admin('GET', FIN + '/export.csv?month=2026-04')).text;
+      assert.ok(apr.includes('web_sale;2026-04-01;80,00;web;') && !apr.includes('VN-S1'), apr);
+      const mar = (await srv.admin('GET', FIN + '/export.csv?month=2026-03')).text;
+      assert.ok(mar.includes('web_refund;2026-03-01;1,00;') && mar.includes('web_sale;2026-03-31;40,00;'), mar);
+    } finally { await srv.stop(); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---------- Codex P2 (c4e78af): new and repeated entries default to the Madrid date ----------
+test('the admin form defaults to today in Madrid, not the UTC day', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'admin.js'), 'utf8');
+  const fn = src.match(/^function shopToday[\s\S]*?^\}\r?$/m);
+  assert.ok(fn, 'shopToday not found in admin.js');
+  const shopToday = new Function(fn[0] + '\nreturn shopToday;')();
+  assert.strictEqual(shopToday(new Date('2026-07-31T22:30:00Z')), '2026-08-01', 'summer, 00:30 in Madrid');
+  assert.strictEqual(shopToday(new Date('2026-07-31T21:59:59Z')), '2026-07-31');
+  assert.strictEqual(shopToday(new Date('2026-01-31T23:30:00Z')), '2026-02-01', 'winter, 00:30 in Madrid');
+  assert.strictEqual(shopToday(new Date('2026-01-31T22:59:59Z')), '2026-01-31');
+  // The form, the copy action and the starting month all use it; no UTC day is left in the finance code
+  const financeUi = src.slice(src.indexOf('/* ---------- Finans ---------- */'), src.indexOf('async function viewStats'));
+  assert.doesNotMatch(financeUi, /\.toISOString\(\)/);
+  assert.match(financeUi, /date: shopToday\(\)/);
+  assert.match(financeUi, /value="\$\{esc\(e\.date \|\| shopToday\(\)\)\}"/);
+  assert.match(financeUi, /let finMonth = shopToday\(\)\.slice\(0, 7\)/);
 });
 
 test('import: missing columns, empty files and oversized batches are refused', async () => {
