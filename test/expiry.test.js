@@ -926,3 +926,69 @@ test('an admin payment undone on a card order really paid at Stripe: the check r
     assert.strictEqual(s.smtp.messages.length, before, 'the confirmation already went out once: not again');
   } finally { await s.close(); }
 });
+
+// ---------- Closing the Stripe page vs reinstating the order (Codex P2) ----------
+test('race: reinstating while the admin cancel is closing the Stripe page waits (409); after a failed close: reinstated, page open, stock right', async () => {
+  const s = await shop();
+  try {
+    const ref = await s.order('card', 2);
+    Object.assign(s.sessionOf(ref), { expireDelayMs: 800, expireFail: true });   // Stripe is slow, then refuses
+    assert.strictEqual((await s.srv.setOrder(ref, { status: 'cancelled' })).status, 200);
+    assert.strictEqual(s.stock(), 10);
+    assert.ok(await until(() => s.stripe.state.expires === 1), 'closing in progress');
+    const r = await s.srv.setOrder(ref, { status: 'pending' });
+    assert.strictEqual(r.status, 409, JSON.stringify(r.body));
+    assert.deepStrictEqual([s.get(ref).status, s.stock()], ['cancelled', 10], 'nothing changed');
+    assert.ok(await until(() => s.get(ref).stripe_expiring_at === null), 'released after the failed close');
+    assert.strictEqual((await s.srv.setOrder(ref, { status: 'pending' })).status, 200);
+    assert.deepStrictEqual([s.get(ref).status, s.stock(), s.sessionOf(ref).status], ['pending', 8, 'open']);
+    // the Stripe check never closes the page of a pending order, nor cancels it while it is open
+    Object.assign(s.sessionOf(ref), { expireFail: false, expireDelayMs: 0 });
+    s.age(ref, '-3 hours');
+    const expires = s.stripe.state.expires;
+    assert.deepStrictEqual((await s.expire()).cancelled, []);
+    await sleep(300);
+    assert.deepStrictEqual([s.get(ref).status, s.stock(), s.sessionOf(ref).status, s.stripe.state.expires], ['pending', 8, 'open', expires]);
+  } finally { await s.close(); }
+});
+
+test('race: the order is reinstated while the Stripe check asks about it → its page is not closed, it is not cancelled again', async () => {
+  const s = await shop();
+  try {
+    const ref = await s.order('card', 2);
+    s.sessionOf(ref).expireFail = true;                                  // the close at cancel time fails: the page stays open
+    assert.strictEqual((await s.srv.setOrder(ref, { status: 'cancelled' })).status, 200);
+    assert.ok(await until(() => s.stripe.state.expires === 1 && !s.get(ref).stripe_expiring_at));
+    Object.assign(s.sessionOf(ref), { expireFail: false, delayMs: 700 });   // Stripe now answers slowly
+    const running = s.expire();                                          // the check asks about the cancelled order…
+    await sleep(200);
+    assert.strictEqual((await s.srv.setOrder(ref, { status: 'pending' })).status, 200);   // …while the admin reinstates it
+    await running;
+    await sleep(300);
+    assert.deepStrictEqual([s.sessionOf(ref).status, s.stripe.state.expires], ['open', 1], 'the reinstated order keeps its open page');
+    assert.deepStrictEqual([s.get(ref).status, s.stock()], ['pending', 8]);
+    s.age(ref, '-3 hours');
+    s.sessionOf(ref).delayMs = 0;
+    assert.deepStrictEqual((await s.expire()).cancelled, [], 'not cancelled again');
+    assert.deepStrictEqual([s.get(ref).status, s.stock()], ['pending', 8], 'stock taken once, not released again');
+  } finally { await s.close(); }
+});
+
+test('race: reinstating while the Stripe check is closing the page waits (409); the page closes once, stock returned once', async () => {
+  const s = await shop();
+  try {
+    const ref = await s.order('card', 3);
+    s.sessionOf(ref).expireFail = true;
+    assert.strictEqual((await s.srv.setOrder(ref, { status: 'cancelled' })).status, 200);
+    assert.ok(await until(() => s.stripe.state.expires === 1 && !s.get(ref).stripe_expiring_at));
+    Object.assign(s.sessionOf(ref), { expireFail: false, expireDelayMs: 800 });
+    await s.expire();                                                    // the check sees the page open and starts closing it
+    assert.ok(await until(() => s.stripe.state.expires === 2), 'closing in progress');
+    assert.strictEqual((await s.srv.setOrder(ref, { status: 'pending' })).status, 409);
+    assert.ok(await until(() => s.sessionOf(ref).status === 'expired' && s.get(ref).stripe_expiring_at === null));
+    assert.deepStrictEqual([s.get(ref).status, s.stock()], ['cancelled', 10], 'stock returned once by the cancel');
+    await s.expire();
+    assert.ok(s.get(ref).stripe_done_at, 'Stripe is final');
+    assert.strictEqual(s.stock(), 10);
+  } finally { await s.close(); }
+});

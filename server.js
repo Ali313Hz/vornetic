@@ -581,7 +581,7 @@ async function runExpiry() {
     }
     // cancelled but the payment page is still open: close it (if the customer pays first, Stripe
     // refuses and the next run records the payment)
-    if (o.status === 'cancelled' && sess.status === 'open') expireStripeSession(o.stripe_session);
+    if (o.status === 'cancelled' && sess.status === 'open') expireCancelledSession(o.id);   // rechecks: may have been reinstated meanwhile
     skip(`Stripe: ${sess.status || 'unknown'} / ${sess.payment_status || 'unknown'}`);
   }
   flushMails();
@@ -719,12 +719,28 @@ async function stripe(method, url, params) {
   if (!r.ok) throw new Error(data.error?.message || 'Stripe error');
   return data;
 }
-// Close a card order's Stripe payment page (best effort, never inside a transaction): used when the
-// order is cancelled. Stripe refuses if the customer has just paid; the Stripe check then records it.
-function expireStripeSession(id) {
-  if (!STRIPE_KEY || !id) return Promise.resolve(false);
-  return stripe('POST', `/v1/checkout/sessions/${encodeURIComponent(id)}/expire`)
-    .then(() => true, e => { console.error('Could not close the Stripe payment page:', e.message); return false; });
+// Close the Stripe payment page of a cancelled card order (best effort). Stripe refuses if the
+// customer has just paid; the Stripe check then records it. The order's CURRENT state decides, not
+// an earlier snapshot: one statement claims it (stripe_expiring_at) only if it is still cancelled and
+// unpaid, and reinstating it answers 409 while the claim is on (see PUT /api/admin/orders/:id).
+// No transaction is open during the Stripe call; the claim is released when it ends, whatever the
+// result (a claim older than STRIPE_EXPIRE_CLAIM — a stopped server — no longer blocks).
+const STRIPE_EXPIRE_CLAIM = '-1 minutes';   // the Stripe call times out after 15 s
+async function expireCancelledSession(orderId) {
+  if (!STRIPE_KEY) return false;
+  const o = db.prepare(`UPDATE orders SET stripe_expiring_at = datetime('now')
+    WHERE id = ? AND status = 'cancelled' AND paid_at IS NULL AND payment_method = 'card' AND stripe_session IS NOT NULL
+    RETURNING stripe_session`).get(orderId);
+  if (!o) return false;
+  try {
+    await stripe('POST', `/v1/checkout/sessions/${encodeURIComponent(o.stripe_session)}/expire`);
+    return true;
+  } catch (e) {
+    console.error('Could not close the Stripe payment page:', e.message);
+    return false;
+  } finally {
+    db.prepare('UPDATE orders SET stripe_expiring_at = NULL WHERE id = ?').run(orderId);
+  }
 }
 // A Checkout Session, with its payment and charge, so we know when the money was actually taken
 function stripeSession(id) {
@@ -1083,6 +1099,9 @@ app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
       // reinstating: "cancelled" e-mails that haven't left yet must not go; undoing a payment: nor "paid" ones
       if (status !== 'cancelled') dropMails(o.id, CANCELLED_MAILS);
       if (undoManualPayment || (status === 'cancelled' && o.status !== 'cancelled')) dropMails(o.id, PAID_MAILS);
+      // reinstating a card order whose Stripe payment page is being closed right now: wait for that
+      if (status !== 'cancelled' && db.prepare("SELECT 1 FROM orders WHERE id = ? AND stripe_expiring_at > datetime('now', ?)").get(o.id, STRIPE_EXPIRE_CLAIM))
+        throw Object.assign(new Error('Stripe ödeme sayfası şu an kapatılıyor. Birkaç saniye sonra tekrar dene.'), { status: 409 });
       // Put stock back when an order is cancelled, take it again if un-cancelled (only if there is enough)
       if (status !== o.status && status === 'cancelled') returnStock(JSON.parse(o.items));
       if (status !== o.status && o.status === 'cancelled')
@@ -1102,7 +1121,7 @@ app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
   if (newlyPaid) flushMails();
   // An unpaid card order was cancelled: close its Stripe payment page so it can't be paid any more.
   // (Not relied on: the Stripe check keeps watching cancelled card orders until Stripe is final.)
-  if (status === 'cancelled' && o.status !== 'cancelled' && o.payment_method === 'card' && !o.paid_at) expireStripeSession(o.stripe_session);
+  if (status === 'cancelled' && o.status !== 'cancelled' && o.payment_method === 'card' && !o.paid_at) expireCancelledSession(o.id);
   // Tell the customer when the order is paid, shipped or cancelled
   let mailed = false;
   if (status !== o.status && b.notify !== false && ['paid', 'shipped', 'cancelled'].includes(status)) {

@@ -166,7 +166,7 @@ async function fakeSmtp() {
 // chargeCreated (Unix seconds) = when Stripe took the money: returned as the successful charge
 // when the request expands payment_intent.latest_charge. state.getUrls lists every GET URL.
 // POST .../expire closes an open, unpaid page (state.expires counts the calls); it is refused
-// otherwise, or always when the session has expireFail set.
+// otherwise, or always when the session has expireFail set; expireDelayMs makes it slow.
 async function fakeStripe() {
   const http = require('node:http');
   const state = { sessions: {}, creates: 0, gets: 0, getUrls: [], expires: 0 };
@@ -186,6 +186,7 @@ async function fakeStripe() {
         state.expires++;
         const s = state.sessions[x[1]];
         if (!s) return send(404, { error: { message: 'No such checkout session' } });
+        if (s.expireDelayMs) await new Promise(r => setTimeout(r, s.expireDelayMs));
         if (s.expireFail) return send(500, { error: { message: 'fake Stripe error on expire' } });
         if (s.status !== 'open' || s.payment_status !== 'unpaid') return send(400, { error: { message: 'Only open sessions can be expired' } });
         s.status = 'expired';

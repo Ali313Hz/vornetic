@@ -152,6 +152,9 @@ for (const sql of [
   // Set once Stripe has given a final answer for the card order's payment page (paid, or expired
   // unpaid): a cancelled card order is checked with Stripe until then, in case the customer paid anyway
   'ALTER TABLE orders ADD COLUMN stripe_done_at TEXT',
+  // Set while the shop is asking Stripe to close the payment page of a cancelled card order: the
+  // order can't be reinstated until that request is over (see expireCancelledSession)
+  'ALTER TABLE orders ADD COLUMN stripe_expiring_at TEXT',
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 
 // Payment date. Runs once, when the column is added. Orders already paid/shipped/delivered get
