@@ -137,6 +137,10 @@ for (const sql of [
   'ALTER TABLE orders ADD COLUMN paid_via TEXT',
   // 1 = cancelled before payment dates were stored: nobody knows if it was paid; the admin checks
   'ALTER TABLE orders ADD COLUMN payment_unknown INTEGER NOT NULL DEFAULT 0',
+  // Set when the shop cancels an unpaid order automatically: when, and why
+  // ('unpaid_5_days' = Bizum/transfer not paid in 5 days, 'card_checkout_expired' = Stripe page expired unpaid)
+  'ALTER TABLE orders ADD COLUMN auto_cancelled_at TEXT',
+  'ALTER TABLE orders ADD COLUMN auto_cancel_reason TEXT',
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 
 // Payment date. Runs once, when the column is added. Orders already paid/shipped/delivered get

@@ -140,6 +140,11 @@ function waUrl(phone, text) {
   const p = (phone || '').replace(/[^\d]/g, '');
   return p ? `https://wa.me/${p.length === 9 ? '34' + p : p}?text=${encodeURIComponent(text)}` : '';
 }
+// Why an order was cancelled automatically (server: expireUnpaidOrders)
+const AUTO_CANCEL = {
+  unpaid_5_days: 'Otomatik iptal: 5 günde ödeme gelmedi',
+  card_checkout_expired: 'Otomatik iptal: kart ödemesi tamamlanmadı',
+};
 // Answers to "was this old cancelled order paid?", oldest first, with a button to correct the latest
 const PCHK = { paid: 'Ödenmişti', unpaid: 'Ödenmemişti' };
 function paymentCheckHtml(o) {
@@ -157,7 +162,7 @@ function orderHtml(o) {
     <div class="order-head">
       <div><b>${esc(o.ref)}</b> · <span class="muted">${esc(day(o.created_at))}</span> · <span class="muted">${esc(o.lang.toUpperCase())}</span>
         ${o.user_id ? ` · <button class="chip-btn small" data-cust="${o.user_id}">kayıtlı müşteri →</button>` : ' · <span class="muted small">misafir</span>'}</div>
-      <div>${refundWarning(o) ? `<span class="status cancelled">${esc(refundWarning(o))}</span> ` : ''}${o.payment_unknown ? '<span class="status pending">⚠ Eski iptal: ödeme durumu bilinmiyor</span> ' : ''}${o.withdrawals ? '<span class="status pending">↩ Cayma talebi</span> ' : ''}<span class="status ${esc(o.status)}">${STATUS[o.status]}</span></div>
+      <div>${refundWarning(o) ? `<span class="status cancelled">${esc(refundWarning(o))}</span> ` : ''}${o.payment_unknown ? '<span class="status pending">⚠ Eski iptal: ödeme durumu bilinmiyor</span> ' : ''}${AUTO_CANCEL[o.auto_cancel_reason] ? `<span class="status cancelled" title="${esc(day(o.auto_cancelled_at))}">${AUTO_CANCEL[o.auto_cancel_reason]}</span> ` : ''}${o.withdrawals ? '<span class="status pending">↩ Cayma talebi</span> ' : ''}<span class="status ${esc(o.status)}">${STATUS[o.status]}</span></div>
     </div>
     <div class="order-cols">
       <div class="items">${items.map(i => `<div><b>${i.qty}× ${esc(i.name)}</b> — ${eur(i.unit_cents * i.qty)}

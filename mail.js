@@ -63,6 +63,8 @@ const L = {
     tracking: 'Tracking number',
     cancelled_subject: ref => `Order ${ref} cancelled`,
     cancelled_intro: 'Your order has been cancelled. If you already paid, we will refund you in full. Reply to this e-mail if you have any question.',
+    expired_subject: ref => `Order ${ref} cancelled — payment not received`,
+    expired_intro: 'We have cancelled your order because we did not receive the payment within 5 days, as stated in our terms of sale. If you have paid in the meantime, reply to this e-mail and we will sort it out (we will send the order or refund you in full).',
     charged_cancelled_subject: ref => `Payment received for cancelled order ${ref} — refund on its way`,
     charged_cancelled_intro: a => `We received your card payment of <b>${a}</b>, but this order had already been cancelled, so it will <b>not</b> be shipped. We will refund the full amount to your card. Reply to this e-mail if you have any question.`,
     wd_subject: ref => `Withdrawal received — order ${ref}`,
@@ -91,6 +93,8 @@ const L = {
     tracking: 'Número de seguimiento',
     cancelled_subject: ref => `Pedido ${ref} cancelado`,
     cancelled_intro: 'Tu pedido ha sido cancelado. Si ya habías pagado, te devolveremos el importe completo. Responde a este email si tienes cualquier duda.',
+    expired_subject: ref => `Pedido ${ref} cancelado — no hemos recibido el pago`,
+    expired_intro: 'Hemos cancelado tu pedido porque no hemos recibido el pago en 5 días, como indican nuestras condiciones de venta. Si ya has pagado, responde a este email y lo solucionamos (te enviamos el pedido o te devolvemos el importe completo).',
     charged_cancelled_subject: ref => `Pago recibido para el pedido cancelado ${ref} — te lo devolvemos`,
     charged_cancelled_intro: a => `Hemos recibido tu pago con tarjeta de <b>${a}</b>, pero este pedido ya estaba cancelado, así que <b>no</b> se enviará. Te devolveremos el importe completo a tu tarjeta. Responde a este email si tienes cualquier duda.`,
     wd_subject: ref => `Desistimiento recibido — pedido ${ref}`,
@@ -208,5 +212,12 @@ function test(s) {
   return send(s.shop_email, 'Vornetic — test e-mail', layout('<p>E-posta ayarları çalışıyor ✔</p>', s));
 }
 
-module.exports = { enabled, orderConfirmation, statusUpdate, withdrawalAck, passwordReset, shopNewOrder, shopWithdrawal,
+// A Bizum/transfer order was cancelled automatically: no payment within 5 days (terms of sale)
+function orderExpired(o, s) {
+  const t = T(o.lang);
+  return send(o.email, t.expired_subject(o.ref), layout(`<p>${t.hello(esc(o.customer_name))}</p><p>${t.expired_intro}</p>
+    <p><b>${t.order}: ${esc(o.ref)}</b></p><p>${t.bye}</p>`, s));
+}
+
+module.exports = { enabled, orderConfirmation, statusUpdate, orderExpired, withdrawalAck, passwordReset, shopNewOrder, shopWithdrawal,
   chargedAfterCancel, shopChargedAfterCancel, test };

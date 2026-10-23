@@ -150,4 +150,43 @@ async function fakeSmtp() {
   };
 }
 
-module.exports = { ROOT, ADMIN_PASSWORD, CUSTOMER, tempDir, startServer, oldDatabase, fakeSmtp, INHERITED_SETTINGS, VIA_PROXY };
+// Fake Stripe (Checkout Sessions) on 127.0.0.1. Each created session can be steered:
+//   sessions[id] = { ref, params, status: 'open'|'expired'|'complete', payment_status: 'unpaid'|'paid',
+//                    fail: 500|401|'badjson'|null, delayMs, answerId, answerRef }
+// answerId / answerRef let a test make Stripe answer with a different session or order.
+async function fakeStripe() {
+  const http = require('node:http');
+  const state = { sessions: {}, creates: 0, gets: 0 };
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', d => { body += d; });
+    req.on('end', async () => {
+      const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+      if (req.method === 'POST' && req.url === '/v1/checkout/sessions') {
+        const params = Object.fromEntries(new URLSearchParams(body));
+        const id = 'cs_test_' + (++state.creates);
+        state.sessions[id] = { ref: params.client_reference_id, params, status: 'open', payment_status: 'unpaid' };
+        return send(200, { id, url: 'https://checkout.example.test/pay/' + id });
+      }
+      const m = req.url.match(/^\/v1\/checkout\/sessions\/(\w+)$/);
+      if (req.method === 'GET' && m) {
+        state.gets++;
+        const s = state.sessions[m[1]];
+        if (!s) return send(404, { error: { message: 'No such checkout session' } });
+        if (s.delayMs) await new Promise(r => setTimeout(r, s.delayMs));
+        if (s.fail === 'badjson') { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end('{not json'); }
+        if (s.fail) return send(s.fail, { error: { message: 'fake Stripe error ' + s.fail } });
+        return send(200, { id: s.answerId || m[1], client_reference_id: s.answerRef || s.ref, status: s.status, payment_status: s.payment_status });
+      }
+      send(404, { error: { message: 'not found' } });
+    });
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  return {
+    state, server, url: `http://127.0.0.1:${server.address().port}`,
+    env: { STRIPE_SECRET_KEY: 'sk_test_fake_key_for_automated_tests', STRIPE_API_URL: `http://127.0.0.1:${server.address().port}` },
+    close: () => new Promise(r => { server.closeAllConnections(); server.close(r); }),
+  };
+}
+
+module.exports = { ROOT, ADMIN_PASSWORD, CUSTOMER, tempDir, startServer, oldDatabase, fakeSmtp, fakeStripe, INHERITED_SETTINGS, VIA_PROXY };

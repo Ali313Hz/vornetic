@@ -418,6 +418,76 @@ function cardPaymentMails(o, base) {
   mail.shopNewOrder(o, s, base);
 }
 
+// ---------- Unpaid orders: release them so their stock is not reserved forever ----------
+const UNPAID_DAYS = 5;                  // terms of sale: Bizum/transfer orders not paid within 5 days are cancelled
+const CARD_SESSION_MINUTES = 60;        // how long the Stripe payment page stays open (stripeCheckout)
+const CARD_CHECK_AFTER_MINUTES = 120;   // ask Stripe about an unpaid card order only once its page has expired
+const EXPIRY_BATCH = 50;                // at most this many Stripe checks per run
+
+// Cancel an order only if it is STILL pending and unpaid, and give its stock back in the same
+// transaction. If the customer paid or the admin cancelled meanwhile, nothing changes, so stock
+// is never returned twice. Returns true if this call cancelled it.
+function autoCancel(orderId, reason) {
+  return inTransaction(() => {
+    const r = db.prepare(`UPDATE orders SET status = 'cancelled', auto_cancelled_at = datetime('now'), auto_cancel_reason = ?
+      WHERE id = ? AND status = 'pending' AND paid_at IS NULL`).run(reason, orderId);
+    if (r.changes) returnStock(JSON.parse(db.prepare('SELECT items FROM orders WHERE id = ?').get(orderId).items));
+    return r.changes === 1;
+  });
+}
+
+// Runs when the server starts, every 15 minutes, and on POST /api/admin/orders/expire-unpaid.
+// - Bizum / bank transfer: pending, no payment recorded, placed more than 5 days ago
+//     → cancelled, stock returned, customer told by e-mail.
+// - Card: pending, no payment recorded, placed more than 2 hours ago → Stripe is asked first:
+//     paid → the payment is recorded (normal confirmation e-mails); the order is never cancelled
+//     payment page expired and unpaid → cancelled, stock returned (no e-mail: payment was never finished)
+//     anything else — page still open, payment still processing, Stripe error, timeout, an answer
+//     that doesn't match the order → left alone and checked again next time.
+// An order whose payment can't be checked is never cancelled. Only one run at a time.
+// "Contact" orders (no payment method set up) are never touched: the admin arranges those.
+let expiryRun = null;
+function expireUnpaidOrders() {
+  if (!expiryRun) expiryRun = runExpiry().finally(() => { expiryRun = null; });
+  return expiryRun;
+}
+async function runExpiry() {
+  const out = { cancelled: [], paid: [], skipped: [] };
+  const s = getSettings(), base = PUBLIC_URL || `http://localhost:${PORT}`;
+  const overdue = db.prepare(`SELECT id, ref FROM orders WHERE status = 'pending' AND paid_at IS NULL
+      AND payment_method IN ('bizum', 'transfer') AND created_at <= datetime('now', ?) ORDER BY id`).all(`-${UNPAID_DAYS} days`);
+  for (const o of overdue) {
+    if (!autoCancel(o.id, 'unpaid_5_days')) continue;
+    out.cancelled.push(o.ref);
+    mail.orderExpired(db.prepare('SELECT * FROM orders WHERE id = ?').get(o.id), s);
+  }
+  const cards = db.prepare(`SELECT id, ref, stripe_session FROM orders WHERE status = 'pending' AND paid_at IS NULL
+      AND payment_method = 'card' AND created_at <= datetime('now', ?) ORDER BY id LIMIT ?`).all(`-${CARD_CHECK_AFTER_MINUTES} minutes`, EXPIRY_BATCH);
+  for (const o of cards) {
+    const skip = reason => out.skipped.push({ ref: o.ref, reason });
+    if (!o.stripe_session) { skip('no Stripe session'); continue; }
+    if (!STRIPE_KEY) { skip('Stripe not configured'); continue; }
+    let sess;
+    try { sess = await stripe('GET', `/v1/checkout/sessions/${encodeURIComponent(o.stripe_session)}`); }
+    catch (e) { skip('Stripe check failed: ' + e.message); continue; }
+    if (!sess || sess.id !== o.stripe_session || sess.client_reference_id !== o.ref) { skip('Stripe answer does not match this order'); continue; }
+    if (sess.payment_status === 'paid') {
+      const paid = recordPayment(o.id, 'stripe');
+      if (paid) { out.paid.push(o.ref); cardPaymentMails(paid, base); }
+      continue;
+    }
+    if (sess.status === 'expired' && sess.payment_status === 'unpaid') {
+      if (autoCancel(o.id, 'card_checkout_expired')) out.cancelled.push(o.ref);
+      else skip('changed while checking');
+      continue;
+    }
+    skip(`Stripe: ${sess.status || 'unknown'} / ${sess.payment_status || 'unknown'}`);
+  }
+  if (out.cancelled.length || out.paid.length || out.skipped.length)
+    console.log(`Unpaid orders: cancelled ${out.cancelled.join(', ') || '-'} · paid ${out.paid.join(', ') || '-'} · left ${out.skipped.length}`);
+  return out;
+}
+
 app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
   const b = req.body || {};
   const s = getSettings();
@@ -542,6 +612,7 @@ async function stripe(method, url, params) {
     method,
     headers: { Authorization: `Bearer ${STRIPE_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params ? new URLSearchParams(params).toString() : undefined,
+    signal: AbortSignal.timeout(15000),     // a hanging Stripe call counts as an error, never as an answer
   });
   const data = await r.json();
   if (!r.ok) throw new Error(data.error?.message || 'Stripe error');
@@ -556,6 +627,9 @@ function stripeCheckout({ ref, email, lang, items, shipping, base }) {
     success_url: `${base}/checkout/success?ref=${ref}&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${base}/checkout?cancelled=1`,
     'metadata[ref]': ref,
+    // The payment page closes after 1 hour, so an abandoned order can be released soon after
+    // (see expireUnpaidOrders). Stripe accepts 30 minutes to 24 hours.
+    expires_at: Math.floor(Date.now() / 1000) + CARD_SESSION_MINUTES * 60,
   };
   const lines = items.map(i => ({
     name: i.name + (i.car ? ` — ${i.car}` : ''),
@@ -881,8 +955,11 @@ app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
       if (status !== o.status && status === 'cancelled') returnStock(JSON.parse(o.items));
       if (status !== o.status && o.status === 'cancelled')
         takeStock(JSON.parse(o.items), (p, qty) => `Stok yetersiz: ${p.name_en} (stokta ${p.stock}, gereken ${qty})`);
-      db.prepare('UPDATE orders SET status = ?, tracking = ? WHERE id = ?')
-        .run(status, b.tracking !== undefined ? str(b.tracking, 200) : o.tracking, o.id);
+      // un-cancelling an automatically cancelled order also clears the "auto-cancelled" note
+      db.prepare(`UPDATE orders SET status = ?, tracking = ?,
+          auto_cancelled_at = CASE WHEN ? = 'cancelled' THEN auto_cancelled_at END,
+          auto_cancel_reason = CASE WHEN ? = 'cancelled' THEN auto_cancel_reason END WHERE id = ?`)
+        .run(status, b.tracking !== undefined ? str(b.tracking, 200) : o.tracking, status, status, o.id);
       if (undoManualPayment)
         db.prepare('UPDATE orders SET paid_at = NULL, paid_at_estimated = 0, paid_via = NULL WHERE id = ?').run(o.id);
       if (PAID_STATUSES.includes(status)) newlyPaid = recordPayment(o.id, 'admin');
@@ -898,6 +975,11 @@ app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
     mail.statusUpdate(db.prepare('SELECT * FROM orders WHERE id = ?').get(o.id), getSettings(), baseUrl(req));
   }
   res.json({ ok: true, mailed });
+});
+
+// Check unpaid orders now (it also runs by itself every 15 minutes); returns what was done
+app.post('/api/admin/orders/expire-unpaid', requireAdmin, async (req, res) => {
+  res.json({ ok: true, ...(await expireUnpaidOrders()) });
 });
 
 // Add a refund (money actually given back). Refunds are only added, never edited, so the dated
@@ -1063,6 +1145,10 @@ const server = app.listen(PORT, HOST, () => {
   // is running on the same data) must not log out that instance's admins.
   revokeAdminSessions();
   console.log(`Vornetic → http://localhost:${PORT}   Admin → http://localhost:${PORT}/admin`);
+  // Release unpaid orders now and every 15 minutes (see expireUnpaidOrders)
+  const expire = () => expireUnpaidOrders().catch(e => console.error('Unpaid order check failed:', e.message));
+  expire();
+  setInterval(expire, 15 * 60 * 1000).unref();
 });
 server.on('error', err => {
   if (err.code === 'EADDRINUSE') {
