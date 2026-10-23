@@ -129,6 +129,8 @@ for (const sql of [
   "ALTER TABLE products ADD COLUMN combos TEXT DEFAULT ''",
   "ALTER TABLE products ADD COLUMN media TEXT DEFAULT ''",
   "ALTER TABLE products ADD COLUMN status TEXT DEFAULT 'available'",
+  // A short-lived pre-release stored a password-derived tag here; remove it if present
+  'ALTER TABLE admin_sessions DROP COLUMN pw_tag',
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 db.exec('CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id)');
 
