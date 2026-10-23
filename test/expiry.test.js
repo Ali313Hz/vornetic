@@ -664,3 +664,118 @@ test('the check and the cancel endpoints are admin-only', async () => {
     assert.strictEqual(s.stock(), 9);
   } finally { await s.close(); }
 });
+
+// ---------- Mail outbox: fair retries, and e-mails that became untrue (Codex P2 ×4) ----------
+test('outbox: e-mails that keep failing do not hold back a new one (least-tried first)', async () => {
+  const s = await shop();
+  try {
+    const failing = await s.order('bizum'), fresh = await s.order('transfer');
+    for (const ref of [failing, fresh]) await s.srv.setOrder(ref, { status: 'cancelled' });
+    await settled(s);
+    const d = new DatabaseSync(path.join(s.srv.dataDir, 'store.db'));
+    try {
+      // 55 cancelled orders whose "payment not received" e-mail keeps being refused (more than one batch of 50)
+      const cols = d.prepare('PRAGMA table_info(orders)').all().map(c => c.name).filter(c => c !== 'id' && c !== 'ref').join(', ');
+      const id = ref => d.prepare('SELECT id FROM orders WHERE ref = ?').get(ref).id;
+      for (let i = 0; i < 55; i++) {
+        d.prepare(`INSERT INTO orders (ref, ${cols}) SELECT ?, ${cols} FROM orders WHERE ref = ?`).run(`VN-FAIL${i}`, failing);
+        d.prepare("INSERT INTO mail_outbox (order_id, kind, tries) VALUES (?, 'expired', 1)").run(id(`VN-FAIL${i}`));
+      }
+      // then a new one, to an address that works
+      d.prepare("UPDATE orders SET email = 'fresh@example.test' WHERE ref = ?").run(fresh);
+      d.prepare("INSERT INTO mail_outbox (order_id, kind) VALUES (?, 'expired')").run(id(fresh));
+    } finally { d.close(); }
+    s.smtp.ctl.reject = /buyer@example\.test/;
+    await s.expire();                                                   // the 15-minute run sends the queue
+    assert.ok(await until(() => s.mail(fresh, 'expired').state === 'sent'), 'the new e-mail went out on the first run');
+    assert.strictEqual(s.smtp.messages.map((m, i) => s.smtp.text(i)).filter(t => /^To: fresh@example\.test\r?$/m.test(t)).length, 1);
+  } finally { await s.close(); }
+});
+
+test('outbox: "paid after cancelling, refund" e-mails are dropped when the order is reinstated; in flight → 409', async () => {
+  const s = await shop();
+  try {
+    // a card order cancelled by the admin, then paid at Stripe anyway
+    const chargedLater = async () => {
+      const ref = await s.order('card');
+      await s.srv.setOrder(ref, { status: 'cancelled' });
+      Object.assign(s.sessionOf(ref), { status: 'complete', payment_status: 'paid' });
+      const c = await s.srv.call('POST', '/api/orders/confirm', { ref, session_id: s.get(ref).stripe_session });
+      assert.deepStrictEqual([c.body.status, c.body.paid], ['cancelled', true]);
+      return ref;
+    };
+    await settled(s);
+    s.smtp.ctl.reject = /./;                                            // the mail server refuses: both wait for a retry
+    const a = await chargedLater();
+    assert.ok(await until(() => s.mail(a, 'charged_after_cancel')?.tries >= 1 && s.mail(a, 'shop_charged_after_cancel')?.tries >= 1));
+    assert.strictEqual((await setOrderSoon(s, a, { status: 'paid' })).status, 200);   // the admin ships it after all
+    assert.deepStrictEqual([s.mail(a, 'charged_after_cancel').state, s.mail(a, 'shop_charged_after_cancel').state], ['dropped', 'dropped']);
+    s.smtp.ctl.reject = null;
+    const before = await settled(s);                                    // (the "paid" status e-mail)
+    await s.expire();
+    await sleep(500);
+    assert.strictEqual(s.smtp.messages.length, before, 'no "will not ship, refund" after reinstating');
+    assert.strictEqual(s.mail(a, 'charged_after_cancel').state, 'dropped');
+
+    s.smtp.ctl.delayMs = 1500;                                          // now the mail server is slow
+    const b = await chargedLater();
+    assert.ok(await until(() => s.mail(b, 'charged_after_cancel')?.state === 'sending'));
+    const r = await s.srv.setOrder(b, { status: 'paid' });
+    assert.strictEqual(r.status, 409, 'that e-mail is on its way: reinstating waits');
+    assert.strictEqual(s.get(b).status, 'cancelled');
+    s.smtp.ctl.delayMs = 0;
+  } finally { await s.close(); }
+});
+
+test('outbox: undoing an admin-recorded payment drops its confirmation e-mails; in flight → 409', async () => {
+  const s = await shop();
+  try {
+    const a = await s.order('card'), b = await s.order('card');
+    await settled(s);
+    s.smtp.ctl.reject = /./;
+    assert.strictEqual((await s.srv.setOrder(a, { status: 'paid' })).status, 200);   // admin marks it paid…
+    assert.ok(await until(() => s.mail(a, 'confirmation')?.tries >= 1 && s.mail(a, 'shop_new_order')?.tries >= 1));
+    assert.strictEqual((await setOrderSoon(s, a, { status: 'pending' })).status, 200); // …by mistake: undone
+    assert.deepStrictEqual([s.get(a).paid_at, s.mail(a, 'confirmation').state, s.mail(a, 'shop_new_order').state], [null, 'dropped', 'dropped']);
+    s.smtp.ctl.reject = null;
+    const before = await settled(s);
+    await s.expire();
+    await sleep(500);
+    assert.strictEqual(s.smtp.messages.length, before, 'no "payment received" for an unpaid order');
+
+    s.smtp.ctl.delayMs = 1500;
+    assert.strictEqual((await s.srv.setOrder(b, { status: 'paid' })).status, 200);
+    assert.ok(await until(() => s.mail(b, 'confirmation')?.state === 'sending'));
+    const r = await s.srv.setOrder(b, { status: 'pending' });
+    assert.strictEqual(r.status, 409, 'the confirmation is on its way: undoing waits');
+    assert.deepStrictEqual([s.get(b).status, !!s.get(b).paid_at], ['paid', true]);
+    s.smtp.ctl.delayMs = 0;
+  } finally { await s.close(); }
+});
+
+test('outbox: a cancellation e-mail that failed is sent for a new cancellation after reinstating', async () => {
+  const s = await shop();
+  try {
+    const ref = await s.order('bizum');
+    s.age(ref, '-6 days');
+    await s.expire();
+    await settled(s);
+    s.smtp.ctl.reject = /buyer@example\.test/;
+    assert.strictEqual((await s.cancelUnpaid(ref)).status, 200);
+    assert.ok(await until(() => s.mail(ref, 'expired').tries >= 1 && s.mail(ref, 'expired').state === 'due'));
+    s.sql('UPDATE mail_outbox SET tries = 9 WHERE id = ?', s.mail(ref, 'expired').id);
+    await s.expire();
+    assert.ok(await until(() => s.mail(ref, 'expired').state === 'failed'), 'gave up');
+
+    assert.strictEqual((await setOrderSoon(s, ref, { status: 'pending' })).status, 200);   // reinstated
+    assert.notStrictEqual(s.mail(ref, 'expired').state, 'failed', 'no "e-mail failed" warning on a reinstated order');
+    s.smtp.ctl.reject = null;
+    const before = await settled(s);
+    await s.expire();                                                   // still overdue
+    assert.strictEqual((await s.cancelUnpaid(ref)).status, 200);        // still not paid: cancelled again
+    assert.ok(await until(() => s.mail(ref, 'expired').state === 'sent'), 'the new cancellation is told');
+    await sleep(300);
+    assert.strictEqual(s.smtp.messages.length, before + 1);
+    assert.match(s.smtp.text(before), /no hemos recibido el pago/);
+  } finally { await s.close(); }
+});

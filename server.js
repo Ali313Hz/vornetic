@@ -421,10 +421,12 @@ function recordPayment(orderId, via, { at = null, estimated = false } = {}) {
 // "still" = what must STILL be true of the order when the e-mail is sent; checked in the same
 // statement that claims the e-mail for sending, so an e-mail that has become untrue is dropped.
 const MAIL_KINDS = {
-  confirmation: { send: (o, s, base) => mail.orderConfirmation(o, s, base), still: "o.status <> 'cancelled'" },
-  shop_new_order: { send: (o, s, base) => mail.shopNewOrder(o, s, base), shop: true },
-  charged_after_cancel: { send: (o, s) => mail.chargedAfterCancel(o, s) },
-  shop_charged_after_cancel: { send: (o, s, base) => mail.shopChargedAfterCancel(o, s, base), shop: true },
+  // "paid, order confirmed": never once the payment is undone (or the order cancelled)
+  confirmation: { send: (o, s, base) => mail.orderConfirmation(o, s, base), still: "o.status <> 'cancelled' AND o.paid_at IS NOT NULL" },
+  shop_new_order: { send: (o, s, base) => mail.shopNewOrder(o, s, base), shop: true, still: 'o.paid_at IS NOT NULL' },
+  // "paid after cancelling, will not ship, refund": never once the order is reinstated
+  charged_after_cancel: { send: (o, s) => mail.chargedAfterCancel(o, s), still: "o.status = 'cancelled' AND o.paid_at IS NOT NULL" },
+  shop_charged_after_cancel: { send: (o, s, base) => mail.shopChargedAfterCancel(o, s, base), shop: true, still: "o.status = 'cancelled' AND o.paid_at IS NOT NULL" },
   // "payment not received, order cancelled": never once the order is reinstated or paid
   expired: { send: (o, s) => mail.orderExpired(o, s), still: "o.status = 'cancelled' AND o.paid_at IS NULL" },
 };
@@ -433,22 +435,27 @@ const MAIL_IN_FLIGHT = '-3 minutes';    // a send claimed longer ago than this h
 
 // Queue an e-mail for an order (inside the caller's transaction). With e-mail switched off nothing
 // is queued: it would otherwise go out, out of date, once e-mail is set up. Only one per order and
-// kind; one that was dropped (the order changed back) is queued again.
+// kind; one that was dropped or had failed is queued again for the new event (e.g. the order was
+// reinstated and is now cancelled again).
 function queueMail(orderId, kind) {
   if (!mail.enabled) return false;
   db.prepare(`INSERT INTO mail_outbox (order_id, kind) VALUES (?, ?)
-    ON CONFLICT (order_id, kind) DO UPDATE SET state = 'due', tries = 0, claimed_at = NULL WHERE state = 'dropped'`).run(orderId, kind);
+    ON CONFLICT (order_id, kind) DO UPDATE SET state = 'due', tries = 0, claimed_at = NULL WHERE state IN ('dropped', 'failed')`).run(orderId, kind);
   return true;
 }
 
-// The "payment not received" e-mail can't be taken back once it is on its way. Called (inside the
-// transaction) before an order is reinstated or a payment is recorded on it: drops that e-mail if it
-// hasn't left yet, and refuses (409) while it is being sent — try again a few seconds later.
-function dropExpiryMail(orderId) {
-  const busy = db.prepare(`SELECT 1 FROM mail_outbox WHERE order_id = ? AND kind = 'expired' AND state = 'sending'
-    AND claimed_at > datetime('now', ?)`).get(orderId, MAIL_IN_FLIGHT);
-  if (busy) throw Object.assign(new Error('Müşteriye "ödeme gelmedi" e-postası şu an gönderiliyor. Birkaç saniye sonra tekrar dene.'), { status: 409 });
-  db.prepare("UPDATE mail_outbox SET state = 'dropped' WHERE order_id = ? AND kind = 'expired' AND state IN ('due', 'sending')").run(orderId);
+// An e-mail can't be taken back once it is on its way. Called (inside the transaction) before a
+// change that makes these e-mails untrue: drops them if they haven't left yet (also a failed one, so
+// a later event can queue it again), and refuses (409) while one is being sent — try again a few
+// seconds later.
+const CANCELLED_MAILS = ['expired', 'charged_after_cancel', 'shop_charged_after_cancel'];   // untrue once reinstated
+const PAID_MAILS = ['confirmation', 'shop_new_order'];                                       // untrue once the payment is undone
+function dropMails(orderId, kinds) {
+  const list = kinds.map(() => '?').join(', ');
+  const busy = db.prepare(`SELECT 1 FROM mail_outbox WHERE order_id = ? AND kind IN (${list}) AND state = 'sending'
+    AND claimed_at > datetime('now', ?)`).get(orderId, ...kinds, MAIL_IN_FLIGHT);
+  if (busy) throw Object.assign(new Error('Bu siparişle ilgili bir e-posta şu an gönderiliyor. Birkaç saniye sonra tekrar dene.'), { status: 409 });
+  db.prepare(`UPDATE mail_outbox SET state = 'dropped' WHERE order_id = ? AND kind IN (${list}) AND state IN ('due', 'sending', 'failed')`).run(orderId, ...kinds);
 }
 
 // Send what is queued. One sender at a time; e-mails queued while it runs get one more pass right
@@ -467,7 +474,8 @@ async function sendQueuedMails() {
   // a send that never finished (the server stopped mid-send): try again — rarely, a duplicate
   db.prepare("UPDATE mail_outbox SET state = 'due', claimed_at = NULL WHERE state = 'sending' AND claimed_at <= datetime('now', ?)").run(MAIL_IN_FLIGHT);
   const s = getSettings(), base = PUBLIC_URL || `http://localhost:${PORT}`;
-  for (const m of db.prepare("SELECT id, kind FROM mail_outbox WHERE state = 'due' ORDER BY id LIMIT 50").all()) {
+  // least-tried first: new e-mails are never stuck behind ones that keep failing
+  for (const m of db.prepare("SELECT id, kind FROM mail_outbox WHERE state = 'due' ORDER BY tries, id LIMIT 50").all()) {
     const k = MAIL_KINDS[m.kind];
     if (!k) { db.prepare("UPDATE mail_outbox SET state = 'failed' WHERE id = ?").run(m.id); continue; }
     const still = `EXISTS (SELECT 1 FROM orders o WHERE o.id = mail_outbox.order_id AND ${k.still || '1'})`;
@@ -1048,8 +1056,9 @@ app.put('/api/admin/orders/:id', requireAdmin, (req, res) => {
   let newlyPaid = null;
   try {
     inTransaction(() => {
-      // reinstating or paying: a "payment not received" e-mail that hasn't left yet must not go
-      if (status !== 'cancelled') dropExpiryMail(o.id);
+      // reinstating: "cancelled" e-mails that haven't left yet must not go; undoing a payment: nor "paid" ones
+      if (status !== 'cancelled') dropMails(o.id, CANCELLED_MAILS);
+      if (undoManualPayment) dropMails(o.id, PAID_MAILS);
       // Put stock back when an order is cancelled, take it again if un-cancelled (only if there is enough)
       if (status !== o.status && status === 'cancelled') returnStock(JSON.parse(o.items));
       if (status !== o.status && o.status === 'cancelled')
@@ -1129,7 +1138,7 @@ app.post('/api/admin/orders/:id/late-payment', requireAdmin, (req, res) => {
   let recorded;
   try {
     recorded = inTransaction(() => {
-      dropExpiryMail(o.id);           // the money arrived: "payment not received" must not go out now
+      dropMails(o.id, ['expired']);   // the money arrived: "payment not received" must not go out now
       return db.prepare(`UPDATE orders SET paid_at = ?, paid_at_estimated = 0, paid_via = 'late',
           late_payment_recorded_at = datetime('now') WHERE id = ? AND status = 'cancelled' AND paid_at IS NULL`)
         .run(finance.localDayStartUtc(paidOn), o.id).changes === 1;
