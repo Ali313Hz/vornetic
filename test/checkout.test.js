@@ -115,7 +115,7 @@ test('card: an attempt whose order ended (page expired, order cancelled) answers
   } finally { await s.close(); }
 });
 
-test('card: Stripe fails to open the page → the order is cancelled and the attempt freed: trying again makes a new order', async () => {
+test('card: Stripe fails to open the page → no order is made, no stock taken: trying again goes through', async () => {
   const s = await shop();
   try {
     const id = newId();
@@ -127,7 +127,7 @@ test('card: Stripe fails to open the page → the order is cancelled and the att
     const retry = await s.place('card', { qty: 2, checkout_id: id });           // the page retries with the same attempt
     assert.ok(retry.body.redirect, JSON.stringify(retry.body));
     const rows = s.orders();
-    assert.deepStrictEqual(rows.map(o => [o.status, o.checkout_id]), [['cancelled', null], ['pending', id]]);
+    assert.deepStrictEqual(rows.map(o => [o.status, o.checkout_id]), [['pending', id]], 'the failed try left nothing behind');
     assert.strictEqual(s.stock(), 8);
   } finally { await s.close(); }
 });
@@ -164,4 +164,64 @@ test('without a (valid) checkout ID the shop works as before; different customer
     assert.notStrictEqual(a.body.ref, b.body.ref);
     assert.strictEqual(s.orders().length, 8);
   } finally { await s.close(); }
+});
+
+// ---------- Codex findings on 6140848 ----------
+test('a repeat still finds its order when that order took the last unit, or the product is gone since (P1)', async () => {
+  const s = await shop();
+  try {
+    const one = (sql, ...a) => s.q(sql, ...a);
+    const pid = one('SELECT id FROM products ORDER BY id DESC LIMIT 1')[0].id;
+    one('SELECT 1');                                                    // (read helper only)
+    const d = new (require('node:sqlite').DatabaseSync)(require('node:path').join(s.srv.dataDir, 'store.db'));
+    try { d.prepare('UPDATE products SET stock = 3 WHERE id = ?').run(pid); } finally { d.close(); }
+    const card = newId(), bizum = newId();
+    const a = await s.place('card', { qty: 2, checkout_id: card });
+    assert.ok(a.body.redirect, JSON.stringify(a.body));
+    const b = await s.place('bizum', { qty: 1, checkout_id: bizum });
+    assert.strictEqual(b.status, 200);
+    assert.strictEqual(s.stock(), 0, 'the last units are taken');
+    // back from Stripe / a retry after a lost answer: the existing order, not "out of stock"
+    const a2 = await s.place('card', { qty: 2, checkout_id: card });
+    assert.deepStrictEqual([a2.status, a2.body.ref, a2.body.redirect], [200, a.body.ref, a.body.redirect], JSON.stringify(a2.body));
+    const b2 = await s.place('bizum', { qty: 1, checkout_id: bizum });
+    assert.deepStrictEqual([b2.status, b2.body.ref], [200, b.body.ref], JSON.stringify(b2.body));
+    // the product is removed from the shop afterwards: a repeat still finds the order
+    assert.strictEqual((await s.srv.admin('DELETE', '/api/admin/products/' + pid)).status, 200);
+    const b3 = await s.place('bizum', { qty: 1, checkout_id: bizum });
+    assert.deepStrictEqual([b3.status, b3.body.ref], [200, b.body.ref], JSON.stringify(b3.body));
+    assert.strictEqual(s.orders().length, 2, 'no new orders');
+  } finally { await s.close(); }
+});
+
+test('the server stops while Stripe is opening the payment page: after the restart the same checkout goes through (P2)', async () => {
+  const fs = require('node:fs');
+  const dir = require('./helpers').tempDir();
+  const stripe = await fakeStripe();
+  try {
+    let srv = await startServer({ ...stripe.env }, dir);
+    let pid;
+    try {
+      const cat = (await srv.admin('GET', '/api/admin/categories')).body[0].slug;
+      pid = (await srv.admin('POST', '/api/admin/products', { category: cat, name_en: 'Item', name_es: 'Artículo', price_cents: 1000, stock: 5 })).body.id;
+      stripe.state.createDelayMs = 3000;                               // Stripe is slow…
+      const pending = srv.call('POST', '/api/orders', { ...CUSTOMER, payment_method: 'card', items: [{ id: pid, qty: 2 }], checkout_id: 'restart-test-checkout-0001' }).catch(() => null);
+      for (let i = 0; i < 100 && !stripe.state.createsStarted; i++) await sleep(50);
+      assert.ok(stripe.state.createsStarted, 'Stripe is being asked');
+    } finally { await srv.stop(); }                                    // …and the server stops right then
+    stripe.state.createDelayMs = 0;
+    srv = await startServer({ ...stripe.env }, dir);
+    try {
+      const again = await srv.call('POST', '/api/orders', { ...CUSTOMER, payment_method: 'card', items: [{ id: pid, qty: 2 }], checkout_id: 'restart-test-checkout-0001' });
+      assert.strictEqual(again.status, 200, JSON.stringify(again.body));
+      assert.ok(again.body.redirect, 'sent to a Stripe payment page');
+      const d = new (require('node:sqlite').DatabaseSync)(require('node:path').join(dir, 'store.db'));
+      try {
+        const rows = d.prepare("SELECT status, stripe_session FROM orders WHERE status <> 'cancelled'").all();
+        assert.strictEqual(rows.length, 1, 'one live order');
+        assert.ok(rows[0].stripe_session, 'with its payment page saved');
+        assert.strictEqual(d.prepare('SELECT stock FROM products WHERE id = ?').get(pid).stock, 3, 'stock taken once');
+      } finally { d.close(); }
+    } finally { await srv.stop(); }
+  } finally { await stripe.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });

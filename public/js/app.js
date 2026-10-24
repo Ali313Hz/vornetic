@@ -874,7 +874,7 @@ async function viewCheckout() {
             <label class="f"><span>${esc(t('country'))}</span><select class="in" name="country">
               ${CONFIG.countries.map(c => `<option value="${c}"${(saved.country || 'ES') === c ? ' selected' : ''}>${esc(t('countries')[c] || c)}</option>`).join('')}
             </select></label></div>
-          <label class="f" style="margin:0"><span>${esc(t('notes'))}</span><textarea class="in" name="notes" maxlength="500"></textarea></label>
+          <label class="f" style="margin:0"><span>${esc(t('notes'))}</span><textarea class="in" name="notes" maxlength="500">${esc((store.get('vcheckout', null) || {}).notes || '')}</textarea></label>
           <p class="muted small" style="margin:10px 0 0">${esc(t('zip_hint'))}</p>
         </div>
         <div class="box"><h3>${esc(t('payment'))}</h3>
@@ -951,10 +951,12 @@ async function viewCheckout() {
 // the same, also after coming back from the Stripe page. The server answers a repeat of the same
 // attempt with the order it already made, so a double click, a refresh, a second tab or "back" from
 // Stripe never makes a second order. Only a short hash of the cart and form is stored, not the data.
+// The attempt also keeps the order notes: they are not in the saved delivery details, and the
+// checkout page puts them back, so coming back from Stripe gives the same form — the same attempt.
 function checkoutAttempt(body) {
   const fp = hashText(JSON.stringify(body));
   let a = store.get('vcheckout', null);
-  if (!a || a.fp !== fp || !a.id) { a = { id: newCheckoutId(), fp }; store.set('vcheckout', a); }
+  if (!a || a.fp !== fp || !a.id) { a = { id: newCheckoutId(), fp, notes: body.notes || '' }; store.set('vcheckout', a); }
   return a.id;
 }
 const newCheckoutId = () => crypto.randomUUID ? crypto.randomUUID()
