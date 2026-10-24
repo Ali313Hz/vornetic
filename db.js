@@ -411,19 +411,65 @@ function parseBulbs(text, cars) {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-// ---------- Daily backup: data/backups/store-YYYY-MM-DD.db, keeps the last 14 ----------
-function backup() {
+// ---------- Snapshots: data/backups/store-YYYY-MM-DDTHH.db, every hour (UTC hour in the name) ----------
+// A consistent copy of the database (VACUUM INTO) is written under a temporary name and then
+// renamed, so a half-written file never has a backup name (scripts/backup-offsite.sh takes the
+// newest one off the server, encrypted). Kept here: every snapshot of the last 48 hours, and the
+// newest one of each day for 30 days — also the older daily files (store-YYYY-MM-DD.db).
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+const SNAPSHOT = /^store-(\d{4}-\d{2}-\d{2})(?:T(\d{2}))?\.db$/;
+const KEEP_HOURS = 48, KEEP_DAYS = 30;
+function backup(now = new Date()) {
   try {
-    const dir = path.join(DATA_DIR, 'backups');
-    fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, `store-${today()}.db`);
-    if (!fs.existsSync(file)) db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
-    const old = fs.readdirSync(dir).filter(f => /^store-\d{4}-\d{2}-\d{2}\.db$/.test(f)).sort().slice(0, -14);
-    for (const f of old) fs.unlinkSync(path.join(dir, f));
-  } catch (e) { console.error('Backup failed:', e.message); }
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    const file = path.join(BACKUP_DIR, `store-${now.toISOString().slice(0, 13)}.db`);
+    if (!fs.existsSync(file)) {
+      const tmp = file + '.tmp';
+      fs.rmSync(tmp, { force: true });
+      db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+      fs.renameSync(tmp, file);
+    }
+    pruneBackups(BACKUP_DIR, now);
+    return file;
+  } catch (e) { console.error('Backup failed:', e.message); return null; }
+}
+function pruneBackups(dir, now = new Date()) {
+  const snaps = fs.readdirSync(dir).map(f => {
+    const m = SNAPSHOT.exec(f);
+    return m && { f, day: m[1], t: Date.parse(`${m[1]}T${m[2] || '00'}:00:00Z`) };
+  }).filter(Boolean).sort((a, b) => b.t - a.t);               // newest first
+  const keep = new Set(), daysKept = new Set();
+  for (const s of snaps) {
+    const age = now - s.t;
+    if (age < KEEP_HOURS * 3600e3) keep.add(s.f);
+    else if (age < KEEP_DAYS * 86400e3 && !daysKept.has(s.day)) { keep.add(s.f); daysKept.add(s.day); }
+  }
+  for (const s of snaps) if (!keep.has(s.f)) fs.unlinkSync(path.join(dir, s.f));
+  // a temporary file left by a snapshot that was interrupted (e.g. the server stopped)
+  for (const f of fs.readdirSync(dir)) if (/^store-.*\.db\.tmp$/.test(f) && now - fs.statSync(path.join(dir, f)).mtimeMs > 3600e3) fs.unlinkSync(path.join(dir, f));
+}
+// For the admin: when the newest snapshot was made, and when scripts/backup-offsite.sh last copied
+// a backup off the server: any kind (data/backups/offsite-last-ok) and a FULL one, photos included
+// (offsite-full-last-ok). offsite_stale = either is missing or more than 48 hours old, so hourly
+// database-only copies can't hide a nightly full backup that keeps failing.
+function backupStatus(now = new Date()) {
+  let snapshot_at = null;
+  try {
+    const newest = fs.readdirSync(BACKUP_DIR).filter(f => SNAPSHOT.test(f)).sort().pop();
+    if (newest) snapshot_at = fs.statSync(path.join(BACKUP_DIR, newest)).mtime.toISOString();
+  } catch { /* no backups folder yet */ }
+  const marker = f => {
+    try {
+      const t = fs.readFileSync(path.join(BACKUP_DIR, f), 'utf8').trim();
+      return Number.isNaN(Date.parse(t)) ? null : new Date(t).toISOString();
+    } catch { return null; }                                   // never ran
+  };
+  const offsite_at = marker('offsite-last-ok'), offsite_full_at = marker('offsite-full-last-ok');
+  const old = t => !t || now - Date.parse(t) > 48 * 3600e3;
+  return { snapshot_at, offsite_at, offsite_full_at, offsite_stale: old(offsite_at) || old(offsite_full_at) };
 }
 
 module.exports = {
   db, today, getSettings, parseOptions, parseVariants, parseVariantImages,
-  hashPassword, checkPassword, loadCars, parseBulbs, backup, DATA_DIR,
+  hashPassword, checkPassword, loadCars, parseBulbs, backup, pruneBackups, backupStatus, DATA_DIR,
 };

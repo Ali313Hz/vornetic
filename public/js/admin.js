@@ -70,7 +70,17 @@ async function start() {
   drawTabs();
   show();
 }
+// Production: no backup copied off the server for 2 days (scripts/backup-offsite.sh, README → Yedek)
+function drawBackupWarning() {
+  const b = ME.backup;
+  const when = t => esc(new Date(t).toLocaleString('tr-TR'));
+  const what = !b || !b.offsite_at ? 'Sunucu dışına hiç yedek alınmadı.'
+    : !b.offsite_full_at ? `Fotoğraflarla birlikte tam yedek hiç alınmadı (son veritabanı yedeği: ${when(b.offsite_at)}).`
+    : `Son 2 gündür sunucu dışına ${Date.parse(b.offsite_full_at) < Date.parse(b.offsite_at) ? 'tam yedek (fotoğraflarla)' : 'yedek'} alınmadı (son tam yedek: ${when(b.offsite_full_at)}).`;
+  $('#bkwarn').innerHTML = b && b.warn ? `<p class="notice err" style="margin-top:12px">⚠ ${what} Sunucu çökerse siparişler, müşteri bilgileri ve fotoğraflar kaybolur: README → Yedek.</p>` : '';
+}
 function drawTabs() {
+  drawBackupWarning();
   $('#tabs').innerHTML = Object.entries(TABS).map(([k, v]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}">${v}${
     k === 'withdrawals' && ME.open_withdrawals ? ` <span class="badge" style="position:static;display:inline-grid">${ME.open_withdrawals}</span>` : ''}</button>`).join('');
 }
