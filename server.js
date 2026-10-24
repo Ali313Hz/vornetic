@@ -609,9 +609,9 @@ app.post('/api/admin/logout', (req, res) => {
 });
 app.get('/api/admin/me', requireAdmin, (req, res) => res.json({
   ok: true, stripe: !!STRIPE_KEY, mail: mail.enabled,
-  open_withdrawals: db.prepare('SELECT COUNT(*) c FROM withdrawals WHERE handled = 0').get().c,
   // in production the panel warns when no backup has been copied off the server for 2 days
   backup: (b => ({ ...b, warn: IS_PROD && b.offsite_stale }))(backupStatus()),
+  open_withdrawals: db.prepare('SELECT COUNT(*) c FROM withdrawals WHERE handled = 0').get().c,
   upload: { photo_mb: MAX_PHOTO_MB, video_mb: MAX_VIDEO_MB, photo_ext: IMG_EXT, video_ext: VID_EXT },
 }));
 app.post('/api/admin/test-mail', requireAdmin, async (req, res) => {
