@@ -673,24 +673,73 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
     if (!zone) throw new Error('no_shipping');
 
     const method = b.payment_method;
-    if (!availablePayments(s)[method]) throw new Error('Payment method not available');
 
+    // The same checkout attempt again (double click, refresh, a second tab, "back" from Stripe, a
+    // retry after a lost answer): answer with the order already made instead of a second order.
+    // Checked FIRST, before the catalogue and stock checks meant for new orders: the first request
+    // may have taken the last unit, or the product may be gone since; its order still stands.
+    // The attempt is bound to everything that was ordered and where it goes (as saved, i.e. trimmed):
+    // the same ID with any other delivery detail, note, payment method or cart is refused, never
+    // answered with an order that has different details.
+    const checkoutId = CHECKOUT_ID.test(String(b.checkout_id || '')) ? b.checkout_id : null;
+    const checkoutHash = checkoutId && crypto.createHash('sha256').update(JSON.stringify([email.toLowerCase(), method,
+      name, phone, address, city, zip, province, country, str(b.notes, 500),
+      b.items.map(i => [i && i.id, i && i.qty, i && i.options, i && i.car])])).digest('hex');
+    const again = () => repeatCheckout(db.prepare('SELECT * FROM orders WHERE checkout_id = ?').get(checkoutId), checkoutHash, s, res);
+    if (checkoutId && db.prepare('SELECT 1 FROM orders WHERE checkout_id = ?').get(checkoutId)) return await again();
+    // this attempt is opening its Stripe payment page right now (a request still running here)
+    if (checkoutId && checkoutsOpening.has(checkoutId)) return res.status(409).json({ error: 'checkout_in_progress' });
+
+    if (!availablePayments(s)[method]) throw new Error('Payment method not available');
     const items = b.items.map(cleanLine);
     const subtotal = items.reduce((a, i) => a + i.unit_cents * i.qty, 0);
     const shipping = shippingFor(zone, subtotal, s);
     const total = subtotal + shipping;
     const ref = newRef();
 
+    // Card: the Stripe payment page is made FIRST, and the order is saved together with it below.
+    // So a card order never exists without its payment page: if the server stops (or Stripe fails)
+    // before the order is saved, nothing is left behind — no stock reserved, and the same checkout
+    // simply goes through when tried again. (A page made but not used expires unpaid.)
+    let session = null;
+    if (method === 'card') {
+      if (checkoutId) checkoutsOpening.add(checkoutId);
+      try {
+        session = await stripeCheckout({ ref, email, lang, items, shipping, base: baseUrl(req) });
+      } catch (err) {
+        console.error(`Stripe checkout failed for ${ref}:`, err.message);
+        throw new Error('Card payment is not available right now. Please try again or choose another payment method.');
+      } finally {
+        if (checkoutId) checkoutsOpening.delete(checkoutId);
+      }
+    }
+
     // Save the order and take its stock together; not enough stock = no order at all
-    const info = inTransaction(() => {
-      takeStock(items, (p, qty) => `Not enough stock: ${p.name_en} (only ${p.stock} left, you asked for ${qty})`);
-      return db.prepare(`INSERT INTO orders
-        (ref, user_id, customer_name, email, phone, address, city, zip, province, country, notes, items,
-         subtotal_cents, shipping_cents, total_cents, payment_method, lang)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(ref, user ? user.id : null, name, email, phone, address, city, zip, province, country, str(b.notes, 500),
-          JSON.stringify(items), subtotal, shipping, total, method, lang);
-    });
+    let info;
+    try {
+      info = inTransaction(() => {
+        // Card: Stripe was asked first (an await), so the cart is checked again here, in the same
+        // transaction that takes the stock: a product removed (or changed) meanwhile means no order —
+        // never a payable order for something no longer sold, nor one that differs from the page.
+        if (session && JSON.stringify(b.items.map(cleanLine)) !== JSON.stringify(items))
+          throw new Error('Your cart changed while the payment page was being prepared. Please check it and try again.');
+        takeStock(items, (p, qty) => `Not enough stock: ${p.name_en} (only ${p.stock} left, you asked for ${qty})`);
+        return db.prepare(`INSERT INTO orders
+          (ref, user_id, customer_name, email, phone, address, city, zip, province, country, notes, items,
+           subtotal_cents, shipping_cents, total_cents, payment_method, lang, checkout_id, checkout_hash, stripe_session, stripe_url)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(ref, user ? user.id : null, name, email, phone, address, city, zip, province, country, str(b.notes, 500),
+            JSON.stringify(items), subtotal, shipping, total, method, lang, checkoutId, checkoutHash,
+            session ? session.id : null, session ? session.url : null);
+      });
+    } catch (e) {
+      // no order for this payment page after all (stock gone meanwhile, or the same attempt saved
+      // meanwhile): close it, so it can't be paid
+      if (session) closeStripeSession(session.id);
+      // the same attempt was saved meanwhile (unique checkout_id): its stock was taken once, by that one
+      if (checkoutId && /UNIQUE/i.test(e.message)) return await again();
+      throw e;
+    }
 
     // Remember the address on the customer's account if they have none yet
     if (user && !user.address) {
@@ -698,22 +747,7 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
         .run(phone, address, city, zip, province, country, user.id);
     }
 
-    if (method === 'card') {
-      let session;
-      try {
-        session = await stripeCheckout({ ref, email, lang, items, shipping, base: baseUrl(req) });
-      } catch (err) {
-        // No payment page = no sale: cancel the order and give its stock back
-        console.error(`Stripe checkout failed for ${ref}:`, err.message);
-        inTransaction(() => {
-          const r = db.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ? AND status = 'pending'").run(info.lastInsertRowid);
-          if (r.changes) returnStock(items);
-        });
-        throw new Error('Card payment is not available right now. Please try again or choose another payment method.');
-      }
-      db.prepare('UPDATE orders SET stripe_session = ? WHERE id = ?').run(session.id, info.lastInsertRowid);
-      return res.json({ ok: true, ref, redirect: session.url });   // e-mails are sent once the card payment is confirmed
-    }
+    if (method === 'card') return res.json({ ok: true, ref, redirect: session.url });   // e-mails are sent once the card payment is confirmed
     const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(info.lastInsertRowid);
     mail.orderConfirmation(order, s, baseUrl(req));
     mail.shopNewOrder(order, s, baseUrl(req));
@@ -722,6 +756,49 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
     res.status(400).json({ error: e.message });
   }
 });
+
+// A checkout ID from the shop page: random, 16–64 letters, digits or dashes (crypto.randomUUID)
+const CHECKOUT_ID = /^[A-Za-z0-9-]{16,64}$/;
+// Checkout attempts whose Stripe payment page is being made by a request running right now. Kept in
+// memory on purpose: after a restart no request is running any more, so the attempt can go ahead.
+const checkoutsOpening = new Set();
+// Close a Stripe payment page no order uses (best effort): see POST /api/orders
+function closeStripeSession(id) {
+  stripe('POST', `/v1/checkout/sessions/${encodeURIComponent(id)}/expire`)
+    .catch(e => console.error('Could not close an unused Stripe payment page:', e.message));
+}
+// The answer to a repeated checkout attempt, from the order it already made. No e-mails, no stock:
+// the first request did that. Refused (409) when the attempt can't be continued, so the shop page
+// starts a new one: what was ordered changed ('checkout_changed') or the order ended, e.g. its card
+// payment page expired ('checkout_ended'). 'checkout_in_progress': a card order without its payment
+// page (only orders saved before pages were made first can look like this), or whose page Stripe
+// reports as neither open nor final.
+// An unpaid card order's page is checked with Stripe before it is handed back (it may have expired
+// after an hour, or been paid meanwhile): the same decision as the webhook and the 15-minute check
+// (applyStripeSession), so a payment is recorded once and an expired order released once. If
+// Stripe can't be reached, the page is handed back as before.
+async function repeatCheckout(o, hash, s, res) {
+  if (!o || o.checkout_hash !== hash) return res.status(409).json({ error: 'checkout_changed' });
+  if (o.status === 'cancelled') return res.status(409).json({ error: 'checkout_ended' });
+  if (o.payment_method === 'card') {
+    const paid = x => res.json({ ok: true, ref: x.ref, status: x.status, paid: true, total_cents: x.total_cents, payment_method: 'card' });
+    if (o.paid_at) return paid(o);
+    if (!o.stripe_url) return res.status(409).json({ error: 'checkout_in_progress' });
+    let sess;
+    try { sess = await stripeSession(o.stripe_session); }
+    catch (e) {
+      console.error(`Could not check the Stripe page of ${o.ref}:`, e.message);
+      return res.json({ ok: true, ref: o.ref, redirect: o.stripe_url });
+    }
+    if (applyStripeSession(o, sess).paid) flushMails();
+    const now = db.prepare('SELECT * FROM orders WHERE id = ?').get(o.id);
+    if (now.paid_at) return paid(now);
+    if (now.status === 'cancelled') return res.status(409).json({ error: 'checkout_ended' });
+    if (sess.status === 'open') return res.json({ ok: true, ref: o.ref, redirect: o.stripe_url });
+    return res.status(409).json({ error: 'checkout_in_progress' });
+  }
+  res.json({ ok: true, ref: o.ref, total_cents: o.total_cents, payment_method: o.payment_method, ...paymentInfo(s, o.payment_method) });
+}
 
 // 'contact' = no payment set up yet: take the order and arrange payment by email/WhatsApp
 function availablePayments(s) {

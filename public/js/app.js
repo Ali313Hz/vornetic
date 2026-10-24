@@ -65,6 +65,7 @@ const T = {
     free_ship_over: 'Free shipping over', add_more: 'Add {x} more and shipping is free', ship_es_label: 'mainland Spain',
     zip_hint: 'We ship to mainland Spain, the Balearic Islands and Portugal.',
     err_no_shipping: 'We ship to mainland Spain, the Balearic Islands and Portugal. We cannot ship to the Canary Islands, Ceuta or Melilla yet. Please check your postcode.',
+    err_checkout_in_progress: 'Your order is already being processed. Please wait a few seconds and try again.',
     err_withdraw_not_found: 'We could not find an order with this number and email.',
     err_withdraw_fields: 'Please fill in your name, email and order number.',
     err_bad_token: 'This link is not valid any more. Ask for a new one.',
@@ -149,6 +150,7 @@ const T = {
     free_ship_over: 'Envío gratis desde', add_more: 'Añade {x} más y el envío es gratis', ship_es_label: 'península',
     zip_hint: 'Enviamos a España peninsular, Baleares y Portugal.',
     err_no_shipping: 'Enviamos a España peninsular, Baleares y Portugal. Todavía no podemos enviar a Canarias, Ceuta ni Melilla. Revisa tu código postal.',
+    err_checkout_in_progress: 'Tu pedido ya se está procesando. Espera unos segundos y vuelve a intentarlo.',
     err_withdraw_not_found: 'No encontramos ningún pedido con este número y email.',
     err_withdraw_fields: 'Rellena tu nombre, email y número de pedido.',
     err_bad_token: 'Este enlace ya no es válido. Pide uno nuevo.',
@@ -850,7 +852,10 @@ async function viewCheckout() {
   const fromAccount = ME ? Object.fromEntries(Object.entries({
     email: ME.email, phone: ME.phone, customer_name: ME.name, address: ME.address, zip: ME.zip, city: ME.city,
     province: ME.province, country: ME.country }).filter(([, v]) => v)) : {};
-  const saved = { ...store.get('vaddr', {}), ...fromAccount };
+  // a checkout attempt still waiting (e.g. back from the Stripe page): its form comes back exactly as
+  // sent — ahead of the account's details — so paying again continues the same attempt and order
+  const pending = (store.get('vcheckout', null) || {}).fields || {};
+  const saved = { ...store.get('vaddr', {}), ...fromAccount, ...pending };
   const methods = ['card', 'bizum', 'transfer', 'contact'].filter(m => CONFIG.payments[m]);
   const cancelled = new URLSearchParams(location.search).has('cancelled');
   const f = (name, label, attrs = '') => `<label class="f"><span>${esc(label)}</span><input class="in" name="${name}" value="${esc(saved[name] || '')}" ${attrs}></label>`;
@@ -872,11 +877,11 @@ async function viewCheckout() {
             <label class="f"><span>${esc(t('country'))}</span><select class="in" name="country">
               ${CONFIG.countries.map(c => `<option value="${c}"${(saved.country || 'ES') === c ? ' selected' : ''}>${esc(t('countries')[c] || c)}</option>`).join('')}
             </select></label></div>
-          <label class="f" style="margin:0"><span>${esc(t('notes'))}</span><textarea class="in" name="notes" maxlength="500"></textarea></label>
+          <label class="f" style="margin:0"><span>${esc(t('notes'))}</span><textarea class="in" name="notes" maxlength="500">${esc(saved.notes || '')}</textarea></label>
           <p class="muted small" style="margin:10px 0 0">${esc(t('zip_hint'))}</p>
         </div>
         <div class="box"><h3>${esc(t('payment'))}</h3>
-          <div class="pay">${methods.map((m, i) => `<label><input type="radio" name="payment_method" value="${m}" ${i ? '' : 'checked'}>
+          <div class="pay">${methods.map((m, i) => `<label><input type="radio" name="payment_method" value="${m}" ${(methods.includes(saved.payment_method) ? m === saved.payment_method : !i) ? 'checked' : ''}>
             <span><b style="font-weight:600">${esc(t('pay_' + m))}</b><small>${esc(t('pay_' + m + '_s'))}</small></span></label>`).join('')}</div>
         </div>
       </div>
@@ -923,8 +928,17 @@ async function viewCheckout() {
     store.set('vaddr', addr);
     const btn = $('#coBtn'); btn.disabled = true;
     try {
-      const res = await post('/api/orders', { ...data, lang: LANG, items: cart.get().map(i => ({ id: i.id, qty: i.qty, options: i.options, car: i.car })) });
-      if (res.redirect) { location.href = res.redirect; return; }
+      const body = { ...data, lang: LANG, items: cart.get().map(i => ({ id: i.id, qty: i.qty, options: i.options, car: i.car })) };
+      let res;
+      try { res = await post('/api/orders', { ...body, checkout_id: checkoutAttempt(body) }); }
+      catch (err) {
+        // that attempt can't be continued (its payment page expired, or the order changed): start a new one, once
+        if (!['checkout_changed', 'checkout_ended'].includes(err.message)) throw err;
+        store.del('vcheckout');
+        res = await post('/api/orders', { ...body, checkout_id: checkoutAttempt(body) });
+      }
+      if (res.redirect) { location.href = res.redirect; return; }   // (the attempt is kept: "back" from Stripe continues it)
+      store.del('vcheckout');
       cart.clear();
       try { sessionStorage.setItem('vorder', JSON.stringify(res)); } catch {}
       PRODUCTS = null; ME = undefined;
@@ -936,11 +950,34 @@ async function viewCheckout() {
   });
 }
 
+// One random ID per checkout attempt, kept in this browser (all tabs) while the cart and the form stay
+// the same, also after coming back from the Stripe page. The server answers a repeat of the same
+// attempt with the order it already made, so a double click, a refresh, a second tab or "back" from
+// Stripe never makes a second order. Only a short hash of the cart and form is stored, not the data.
+// The attempt also keeps the form as sent (delivery details, notes, payment method): the checkout
+// page puts it back ahead of the account's details, so coming back from Stripe gives the same form —
+// the same attempt. Cleared once the order is placed or paid.
+function checkoutAttempt(body) {
+  const fp = hashText(JSON.stringify(body));
+  let a = store.get('vcheckout', null);
+  if (!a || a.fp !== fp || !a.id) {
+    const { items, lang, ...fields } = body;
+    a = { id: newCheckoutId(), fp, fields };
+    store.set('vcheckout', a);
+  }
+  return a.id;
+}
+const newCheckoutId = () => crypto.randomUUID ? crypto.randomUUID()
+  : [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
+// FNV-1a, 32 bit: enough to notice that the cart or the form changed
+const hashText = t => { let h = 0x811c9dc5; for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 0x01000193); return (h >>> 0).toString(16); };
+
 async function viewStripeReturn() {
   const q = new URLSearchParams(location.search);
   app.innerHTML = `<div class="loading">…</div>`;
   try {
     const res = await post('/api/orders/confirm', { ref: q.get('ref'), session_id: q.get('session_id') });
+    store.del('vcheckout');
     cart.clear();
     PRODUCTS = null;
     try { sessionStorage.setItem('vorder', JSON.stringify(res)); } catch {}
