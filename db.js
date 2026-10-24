@@ -449,18 +449,24 @@ function pruneBackups(dir, now = new Date()) {
   for (const f of fs.readdirSync(dir)) if (/^store-.*\.db\.tmp$/.test(f) && now - fs.statSync(path.join(dir, f)).mtimeMs > 3600e3) fs.unlinkSync(path.join(dir, f));
 }
 // For the admin: when the newest snapshot was made, and when scripts/backup-offsite.sh last copied
-// one off the server (it writes data/backups/offsite-last-ok). offsite_stale = never, or > 48 hours ago.
+// a backup off the server: any kind (data/backups/offsite-last-ok) and a FULL one, photos included
+// (offsite-full-last-ok). offsite_stale = either is missing or more than 48 hours old, so hourly
+// database-only copies can't hide a nightly full backup that keeps failing.
 function backupStatus(now = new Date()) {
-  let snapshot_at = null, offsite_at = null;
+  let snapshot_at = null;
   try {
     const newest = fs.readdirSync(BACKUP_DIR).filter(f => SNAPSHOT.test(f)).sort().pop();
     if (newest) snapshot_at = fs.statSync(path.join(BACKUP_DIR, newest)).mtime.toISOString();
   } catch { /* no backups folder yet */ }
-  try {
-    const t = fs.readFileSync(path.join(BACKUP_DIR, 'offsite-last-ok'), 'utf8').trim();
-    if (!Number.isNaN(Date.parse(t))) offsite_at = new Date(t).toISOString();
-  } catch { /* never ran */ }
-  return { snapshot_at, offsite_at, offsite_stale: !offsite_at || now - Date.parse(offsite_at) > 48 * 3600e3 };
+  const marker = f => {
+    try {
+      const t = fs.readFileSync(path.join(BACKUP_DIR, f), 'utf8').trim();
+      return Number.isNaN(Date.parse(t)) ? null : new Date(t).toISOString();
+    } catch { return null; }                                   // never ran
+  };
+  const offsite_at = marker('offsite-last-ok'), offsite_full_at = marker('offsite-full-last-ok');
+  const old = t => !t || now - Date.parse(t) > 48 * 3600e3;
+  return { snapshot_at, offsite_at, offsite_full_at, offsite_stale: old(offsite_at) || old(offsite_full_at) };
 }
 
 module.exports = {

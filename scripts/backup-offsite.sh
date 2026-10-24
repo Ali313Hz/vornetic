@@ -10,7 +10,9 @@
 #   who breaks into the server can't read the old ones either. Keep the private key off the server.
 # - Nothing is ever uploaded unencrypted: without a valid AGE_RECIPIENT it stops.
 # - The snapshot must pass scripts/restore-check.js before it leaves the server.
-# - On success it writes data/backups/offsite-last-ok (the admin panel warns if that gets old).
+# - On success it writes data/backups/offsite-last-ok, and after a FULL backup (photos included) also
+#   offsite-full-last-ok: the admin panel warns if either gets old, so hourly database-only copies
+#   can't hide a nightly full backup that keeps failing.
 # - Any problem: non-zero exit and a message on stderr (cron mails it, if mail is set up there).
 set -euo pipefail
 
@@ -19,6 +21,9 @@ CONF="${BACKUP_CONF:-$APP_DIR/scripts/backup.env}"
 # shellcheck disable=SC1090
 if [ -f "$CONF" ]; then . "$CONF"; fi
 DATA_DIR="${DATA_DIR:-$APP_DIR/data}"
+# an absolute path (DATA_DIR may be relative, e.g. "data"): tar -C below changes directory twice
+[ -d "$DATA_DIR" ] || { echo "OFF-SITE BACKUP FAILED: data folder not found: $DATA_DIR" >&2; exit 1; }
+DATA_DIR="$(cd "$DATA_DIR" && pwd)"
 BACKUPS="$DATA_DIR/backups"
 AGE_BIN="${AGE_BIN:-age}"
 RCLONE_BIN="${RCLONE_BIN:-rclone}"
@@ -67,5 +72,8 @@ fi
 "$RCLONE_BIN" delete --min-age "${KEEP_DAYS}d" --include 'vornetic-*.tar.gz.age' "$RCLONE_REMOTE" \
   || echo "warning: could not delete old copies from $RCLONE_REMOTE (the new one was uploaded)" >&2
 
-date -u +%Y-%m-%dT%H:%M:%SZ > "$BACKUPS/offsite-last-ok.tmp" && mv -f "$BACKUPS/offsite-last-ok.tmp" "$BACKUPS/offsite-last-ok"
+NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+mark() { echo "$NOW" > "$BACKUPS/$1.tmp" && mv -f "$BACKUPS/$1.tmp" "$BACKUPS/$1"; }
+mark offsite-last-ok
+if [ "$MODE" = full ]; then mark offsite-full-last-ok; fi
 echo "Off-site backup OK: $NAME ($(basename "$NEWEST")) → $RCLONE_REMOTE"

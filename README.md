@@ -132,7 +132,7 @@ Yayına aldıktan sonra:
 3. Paketi **senin açık anahtarınla şifreler** (`age`). Sunucu kendi yedeğini açamaz; sunucuya biri girse bile eski yedekleri okuyamaz.
 4. Şifreli dosyayı bulut depona kopyalar (`rclone`) ve oradaki eski dosyaları siler (varsayılan: 30 günden eski).
 
-Şifresiz hiçbir şey göndermez. Sorun olursa hata verir; panel de 2 gün boyunca başarılı yedek yoksa uyarı gösterir.
+Şifresiz hiçbir şey göndermez. Sorun olursa hata verir. Panel de uyarı gösterir: 2 gün boyunca hiç başarılı yedek yoksa, ya da saatlik veritabanı yedekleri çalışsa bile 2 gündür fotoğraflarla birlikte tam yedek alınamadıysa.
 
 **Kurulum (bir kez):**
 1. **Kendi bilgisayarında** (sunucuda değil) bir anahtar oluştur: `age-keygen -o vornetic-yedek-anahtari.txt`

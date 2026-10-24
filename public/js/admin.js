@@ -73,9 +73,11 @@ async function start() {
 // Production: no backup copied off the server for 2 days (scripts/backup-offsite.sh, README → Yedek)
 function drawBackupWarning() {
   const b = ME.backup;
-  $('#bkwarn').innerHTML = b && b.warn ? `<p class="notice err" style="margin-top:12px">⚠ ${b.offsite_at
-    ? `Son 2 gündür sunucu dışına yedek alınmadı (son: ${esc(new Date(b.offsite_at).toLocaleString('tr-TR'))}).`
-    : 'Sunucu dışına hiç yedek alınmadı.'} Sunucu çökerse siparişler ve müşteri bilgileri kaybolur: README → Yedek.</p>` : '';
+  const when = t => esc(new Date(t).toLocaleString('tr-TR'));
+  const what = !b || !b.offsite_at ? 'Sunucu dışına hiç yedek alınmadı.'
+    : !b.offsite_full_at ? `Fotoğraflarla birlikte tam yedek hiç alınmadı (son veritabanı yedeği: ${when(b.offsite_at)}).`
+    : `Son 2 gündür sunucu dışına ${Date.parse(b.offsite_full_at) < Date.parse(b.offsite_at) ? 'tam yedek (fotoğraflarla)' : 'yedek'} alınmadı (son tam yedek: ${when(b.offsite_full_at)}).`;
+  $('#bkwarn').innerHTML = b && b.warn ? `<p class="notice err" style="margin-top:12px">⚠ ${what} Sunucu çökerse siparişler, müşteri bilgileri ve fotoğraflar kaybolur: README → Yedek.</p>` : '';
 }
 function drawTabs() {
   drawBackupWarning();

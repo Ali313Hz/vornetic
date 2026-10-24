@@ -80,13 +80,17 @@ test('status for the admin: newest snapshot time; off-site copy never / recent /
   const st = backupStatus();
   assert.ok(st.snapshot_at && Date.now() - Date.parse(st.snapshot_at) < 60e3);
   assert.deepStrictEqual([st.offsite_at, st.offsite_stale], [null, true], 'never copied off the server');
+  // a full backup an hour ago writes both markers
   fs.writeFileSync(path.join(BACKUPS, 'offsite-last-ok'), new Date(Date.now() - 3600e3).toISOString() + '\n');
+  fs.writeFileSync(path.join(BACKUPS, 'offsite-full-last-ok'), new Date(Date.now() - 3600e3).toISOString() + '\n');
   assert.strictEqual(backupStatus().offsite_stale, false);
   fs.writeFileSync(path.join(BACKUPS, 'offsite-last-ok'), new Date(Date.now() - 49 * 3600e3).toISOString());
+  fs.writeFileSync(path.join(BACKUPS, 'offsite-full-last-ok'), new Date(Date.now() - 49 * 3600e3).toISOString());
   assert.strictEqual(backupStatus().offsite_stale, true);
   fs.writeFileSync(path.join(BACKUPS, 'offsite-last-ok'), 'garbage');
   assert.deepStrictEqual([backupStatus().offsite_at, backupStatus().offsite_stale], [null, true]);
   fs.rmSync(path.join(BACKUPS, 'offsite-last-ok'));
+  fs.rmSync(path.join(BACKUPS, 'offsite-full-last-ok'));
 });
 
 // ---------- restore-check ----------
@@ -115,7 +119,7 @@ test('restore-check: a good snapshot passes; garbage, a damaged file or missing 
 });
 
 // ---------- backup-offsite.sh with fake age / rclone ----------
-function offsite({ args = [], env = {}, setup } = {}) {
+function offsite({ args = [], env = {}, setup, relativeDataDir = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vornetic-test-'));
   const remote = path.join(dir, 'remote'), log = path.join(dir, 'rclone.log');
   const age = path.join(dir, 'fake-age'), rclone = path.join(dir, 'fake-rclone');
@@ -143,7 +147,8 @@ esac
   fs.writeFileSync(conf, 'AGE_RECIPIENT=age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs0w4kz\nRCLONE_REMOTE=fake:vornetic-backups\nBACKUP_KEEP_DAYS=30\n');
   const r = spawnSync(BASH, [slash(path.join(ROOT, 'scripts', 'backup-offsite.sh')), ...args], {
     encoding: 'utf8',
-    env: { ...process.env, BACKUP_CONF: slash(conf), DATA_DIR: slash(data), AGE_BIN: slash(age), RCLONE_BIN: slash(rclone),
+    cwd: dir,                                       // relativeDataDir: DATA_DIR=data, as an .env may say
+    env: { ...process.env, BACKUP_CONF: slash(conf), DATA_DIR: relativeDataDir ? 'data' : slash(data), AGE_BIN: slash(age), RCLONE_BIN: slash(rclone),
       NODE_BIN: slash(process.execPath), FAKE_RCLONE_LOG: slash(log), FAKE_REMOTE_DIR: slash(remote), ...env },
   });
   const uploaded = fs.existsSync(remote) ? fs.readdirSync(remote) : [];
@@ -218,4 +223,49 @@ test('admin panel data: /api/admin/me reports the snapshot made at start; no war
     assert.deepStrictEqual([b.offsite_at, b.offsite_stale, b.warn], [null, true, false], 'stale, but the warning is for production only');
     assert.ok(fs.readdirSync(path.join(srv.dataDir, 'backups')).some(f => /^store-\d{4}-\d{2}-\d{2}T\d{2}\.db$/.test(f)));
   } finally { await srv.stop(); }
+});
+
+// ---------- Codex findings on 73840d3 ----------
+test('off-site: a relative DATA_DIR (e.g. "data") works for the full backup too', { skip: !hasBash && 'bash not available' }, () => {
+  const r = offsite({ relativeDataDir: true });
+  try {
+    assert.strictEqual(r.status, 0, r.stderr + r.stdout);
+    const files = r.contents(r.uploaded[0]).files;
+    assert.ok(files.some(f => /^store-.*T\d{2}\.db$/.test(f)) && files.some(f => /uploads\/photo-1\.jpg$/.test(f)), files.join());
+  } finally { r.cleanup(); }
+});
+
+test('off-site: hourly database-only successes do not hide a failing nightly full backup', { skip: !hasBash && 'bash not available' }, () => {
+  const marker = (r, f) => fs.existsSync(path.join(r.data, 'backups', f));
+  const db = offsite({ args: ['--db-only'] });
+  try {
+    assert.strictEqual(db.status, 0, db.stderr);
+    assert.ok(marker(db, 'offsite-last-ok'), 'database copy recorded');
+    assert.ok(!marker(db, 'offsite-full-last-ok'), 'but not as a full backup');
+  } finally { db.cleanup(); }
+  const full = offsite();
+  try {
+    assert.strictEqual(full.status, 0, full.stderr);
+    assert.ok(marker(full, 'offsite-last-ok') && marker(full, 'offsite-full-last-ok'), 'a full backup records both');
+  } finally { full.cleanup(); }
+  const failed = offsite({ env: { FAKE_RCLONE_FAIL: '1' } });
+  try { assert.ok(!marker(failed, 'offsite-full-last-ok'), 'a failed full backup records nothing'); } finally { failed.cleanup(); }
+});
+
+test('status: the warning follows the last FULL off-site backup (database + photos), not just any upload', () => {
+  const write = (f, t) => fs.writeFileSync(path.join(BACKUPS, f), new Date(t).toISOString());
+  const rm = f => fs.rmSync(path.join(BACKUPS, f), { force: true });
+  try {
+    write('offsite-last-ok', Date.now() - 600e3);                     // database copied 10 minutes ago…
+    let st = backupStatus();
+    assert.deepStrictEqual([st.offsite_full_at, st.offsite_stale], [null, true], '…but never a full backup: warn');
+    write('offsite-full-last-ok', Date.now() - 60 * 3600e3);          // last full one 60 hours ago
+    st = backupStatus();
+    assert.ok(st.offsite_full_at);
+    assert.strictEqual(st.offsite_stale, true, 'nightly full backup failing for 2 days: warn');
+    write('offsite-full-last-ok', Date.now() - 20 * 3600e3);
+    assert.strictEqual(backupStatus().offsite_stale, false, 'recent full backup and recent database copy: fine');
+    write('offsite-last-ok', Date.now() - 50 * 3600e3);
+    assert.strictEqual(backupStatus().offsite_stale, true, 'no copy at all for 50 hours: warn');
+  } finally { rm('offsite-last-ok'); rm('offsite-full-last-ok'); }
 });
