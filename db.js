@@ -156,6 +156,9 @@ for (const sql of [
   // order can't be reinstated until that request is over (see expireCancelledSession)
   'ALTER TABLE orders ADD COLUMN stripe_expiring_at TEXT',
   'ALTER TABLE orders ADD COLUMN stripe_expiring_token TEXT',   // which close attempt holds that claim
+  // Set when Stripe says a card order was paid, but not this order's total in euros: the payment is
+  // then NOT recorded automatically; the admin checks it in Stripe (shown on the order)
+  'ALTER TABLE orders ADD COLUMN stripe_mismatch TEXT',
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 
 // Payment date. Runs once, when the column is added. Orders already paid/shipped/delivered get

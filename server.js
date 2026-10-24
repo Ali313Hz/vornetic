@@ -19,6 +19,10 @@ const PORT = process.env.PORT || 3300;
 const DEFAULT_ADMIN_PASSWORD = 'vornetic2026';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || '';
+// Signing secret of the Stripe webhook endpoint (whsec_...), see POST /api/stripe/webhook
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+if (STRIPE_KEY && !STRIPE_WEBHOOK_SECRET)
+  console.warn('⚠  STRIPE_WEBHOOK_SECRET is not set: card payments are only noticed when the customer returns or by the 15-minute check. Set it before taking live card payments (README).');
 const STRIPE_API = stripeConfig.apiBase();
 if (stripeConfig.overrideIgnored()) console.warn('⚠  STRIPE_API_URL is ignored: it only works in the automated tests. Remove it from .env.');
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -101,6 +105,36 @@ if (IS_PROD) app.use((req, res, next) => {
   if (req.method === 'GET' || req.method === 'HEAD') return res.redirect(301, PUBLIC_URL + req.originalUrl);
   res.status(403).json({ error: 'HTTPS required' });
 });
+// ---------- Stripe webhook ----------
+// Stripe tells us at once when a card payment page is paid or closed, even if the customer never
+// comes back to the shop. The event is only a signal: its signature is checked (stripe.js), then the
+// Checkout Session is fetched from Stripe and handled exactly like the 15-minute check does
+// (applyStripeSession: same order, same amount and currency, recorded once). So a replayed or odd
+// event can't record anything Stripe doesn't confirm. Stripe resends an event until it gets a 2xx,
+// so a temporary failure answers 500; everything done here is safe to repeat.
+// Registered before the JSON body parser: the signature is over the exact bytes received.
+const WEBHOOK_EVENTS = new Set(['checkout.session.completed', 'checkout.session.async_payment_succeeded',
+  'checkout.session.async_payment_failed', 'checkout.session.expired']);
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), async (req, res) => {
+  if (!STRIPE_KEY || !STRIPE_WEBHOOK_SECRET) return res.status(503).json({ error: 'Webhook not configured' });
+  let event;
+  try { event = stripeConfig.verifyWebhook(req.body, req.get('stripe-signature'), STRIPE_WEBHOOK_SECRET); }
+  catch { return res.status(400).json({ error: 'Invalid signature' }); }
+  if (!WEBHOOK_EVENTS.has(event && event.type)) return res.json({ received: true });
+  const sessionId = event.data && event.data.object && event.data.object.id;
+  const o = typeof sessionId === 'string' && sessionId
+    ? db.prepare("SELECT * FROM orders WHERE stripe_session = ? AND payment_method = 'card'").get(sessionId) : null;
+  if (!o || o.paid_at) return res.json({ received: true });   // not one of ours, or already recorded
+  try {
+    const result = applyStripeSession(o, await stripeSession(o.stripe_session));
+    if (result.paid) flushMails();
+    res.json({ received: true });
+  } catch (e) {
+    console.error(`Stripe webhook for ${o.ref} failed (Stripe will send it again):`, e.message);
+    res.status(500).json({ error: 'Try again' });
+  }
+});
+
 app.use(express.json({ limit: '200kb' }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public'), { index: false, maxAge: IS_PROD ? '1h' : 0 }));
@@ -548,6 +582,41 @@ function autoCancel(orderId, reason, { notify = false } = {}) {
 //   alone can never block the others.
 // An order whose payment can't be checked is never cancelled. Only one run at a time.
 // "Contact" orders (no payment method set up) are never touched: the admin arranges those.
+// What a Stripe Checkout Session means for its card order: the one decision used by the 15-minute
+// check, the webhook and the customer's return page. o = the order row, sess = the session just
+// fetched from Stripe. Every action is conditional, so running it twice (or two callers at once)
+// changes nothing more. Returns { paid } | { cancelled } | { done } | { already } | { skip: reason }.
+function applyStripeSession(o, sess, { estimated = false } = {}) {
+  if (!sess || sess.id !== o.stripe_session || sess.client_reference_id !== o.ref) return { skip: 'Stripe answer does not match this order' };
+  const stripeDone = () => db.prepare("UPDATE orders SET stripe_done_at = datetime('now') WHERE id = ?").run(o.id);
+  if (sess.payment_status === 'paid') {
+    // The money taken must be this order's total, in euros. If not, nothing is recorded
+    // automatically: the order shows a warning and the admin checks the payment in Stripe.
+    if (sess.amount_total !== o.total_cents || String(sess.currency).toLowerCase() !== 'eur') {
+      db.prepare('UPDATE orders SET stripe_mismatch = ? WHERE id = ? AND stripe_mismatch IS NULL')
+        .run(`Stripe: ${sess.amount_total} ${sess.currency} · sipariş: ${o.total_cents} eur (sent)`, o.id);
+      return { skip: 'amount or currency does not match the order' };
+    }
+    // A cancelled order stays cancelled: it then shows "refund due" and both sides get the
+    // "paid after cancelling" e-mail.
+    const paid = inTransaction(() => {
+      const p = recordPayment(o.id, 'stripe', { at: stripePaidAt(sess), estimated });
+      if (p) stripeDone();
+      return p;
+    });
+    return paid ? { paid: true } : { already: true };
+  }
+  if (sess.status === 'expired' && sess.payment_status === 'unpaid') {
+    if (o.status === 'cancelled') { stripeDone(); return { done: true }; }   // can no longer be paid: nothing to watch
+    if (autoCancel(o.id, 'card_checkout_expired')) { stripeDone(); return { cancelled: true }; }
+    return { skip: 'changed while checking' };
+  }
+  // cancelled but the payment page is still open: close it (if the customer pays first, Stripe
+  // refuses and the next check records the payment)
+  if (o.status === 'cancelled' && sess.status === 'open') expireCancelledSession(o.id);   // rechecks: may have been reinstated meanwhile
+  return { skip: `Stripe: ${sess.status || 'unknown'} / ${sess.payment_status || 'unknown'}` };
+}
+
 let expiryRun = null;
 function expireUnpaidOrders() {
   if (!expiryRun) expiryRun = runExpiry().finally(() => { expiryRun = null; });
@@ -563,11 +632,10 @@ async function runExpiry() {
 
   // Unpaid card orders: pending ones older than 2 hours, and cancelled ones whose payment page
   // Stripe hasn't closed for good yet (the customer may have paid after the admin cancelled)
-  const cards = db.prepare(`SELECT id, ref, status, stripe_session FROM orders WHERE paid_at IS NULL AND payment_method = 'card'
+  const cards = db.prepare(`SELECT id, ref, status, stripe_session, total_cents FROM orders WHERE paid_at IS NULL AND payment_method = 'card'
       AND ((status = 'pending' AND created_at <= datetime('now', ?))
         OR (status = 'cancelled' AND stripe_session IS NOT NULL AND stripe_done_at IS NULL))
       ORDER BY stripe_checked_at IS NOT NULL, stripe_checked_at, id LIMIT ?`).all(`-${CARD_CHECK_AFTER_MINUTES} minutes`, EXPIRY_BATCH);
-  const stripeDone = id => db.prepare("UPDATE orders SET stripe_done_at = datetime('now') WHERE id = ?").run(id);
   for (const [n, o] of cards.entries()) {
     if (Date.now() > deadline) { out.left = cards.length - n; break; }
     const skip = reason => out.skipped.push({ ref: o.ref, reason });
@@ -577,28 +645,11 @@ async function runExpiry() {
     let sess;
     try { sess = await stripeSession(o.stripe_session); }
     catch (e) { skip('Stripe check failed: ' + e.message); continue; }
-    if (!sess || sess.id !== o.stripe_session || sess.client_reference_id !== o.ref) { skip('Stripe answer does not match this order'); continue; }
-    if (sess.payment_status === 'paid') {
-      // without Stripe's payment time, "now" may be hours late: marked as estimated. A cancelled order
-      // stays cancelled: it then shows "refund due" and both sides get the "paid after cancelling" e-mail.
-      const paid = inTransaction(() => {
-        const p = recordPayment(o.id, 'stripe', { at: stripePaidAt(sess), estimated: true });
-        if (p) stripeDone(o.id);
-        return p;
-      });
-      if (paid) out.paid.push(o.ref);       // its e-mails are queued (sent below, retried if they fail)
-      continue;
-    }
-    if (sess.status === 'expired' && sess.payment_status === 'unpaid') {
-      if (o.status === 'cancelled') { stripeDone(o.id); continue; }   // can no longer be paid: nothing to watch
-      if (autoCancel(o.id, 'card_checkout_expired')) { stripeDone(o.id); out.cancelled.push(o.ref); }
-      else skip('changed while checking');
-      continue;
-    }
-    // cancelled but the payment page is still open: close it (if the customer pays first, Stripe
-    // refuses and the next run records the payment)
-    if (o.status === 'cancelled' && sess.status === 'open') expireCancelledSession(o.id);   // rechecks: may have been reinstated meanwhile
-    skip(`Stripe: ${sess.status || 'unknown'} / ${sess.payment_status || 'unknown'}`);
+    // without Stripe's payment time, "now" may be hours late: marked as estimated
+    const r = applyStripeSession(o, sess, { estimated: true });
+    if (r.paid) out.paid.push(o.ref);       // its e-mails are queued (sent below, retried if they fail)
+    else if (r.cancelled) out.cancelled.push(o.ref);
+    else if (r.skip) skip(r.skip);
   }
   flushMails();
   if (out.cancelled.length || out.paid.length || out.skipped.length || out.overdue.length)
@@ -691,12 +742,9 @@ app.post('/api/orders/confirm', limit(30, 10 * 60 * 1000), async (req, res) => {
   if (!o) return res.status(404).json({ error: 'Order not found' });
   try {
     if (!o.paid_at) {
-      const sess = await stripeSession(o.stripe_session);
-      if (sess.payment_status === 'paid') {
-        // If the order was cancelled meanwhile it stays cancelled, but the payment is recorded
-        // so the admin sees that a refund is due.
-        if (inTransaction(() => recordPayment(o.id, 'stripe', { at: stripePaidAt(sess) }))) flushMails();
-      }
+      // same decision as the webhook and the 15-minute check (order, amount and currency must match;
+      // a cancelled order stays cancelled, but the payment is recorded so a refund shows as due)
+      if (applyStripeSession(o, await stripeSession(o.stripe_session)).paid) flushMails();
     }
     // "paid" (was the money received?) is separate from "status" (what happens to the order):
     // a cancelled order can still have been charged, and the return page must say so.

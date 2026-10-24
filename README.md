@@ -90,6 +90,12 @@ Kanarya, Ceuta ve Melilla posta koduna göre otomatik engellenir (oralarda KDV/g
 3. **Panel → Ürünler → her ürün → "Ürün güvenliği bilgisi"**: kutunun etiketindeki üretici adı/adresi. Ürünleri İspanya'daki bir toptancıdan aldıysan "AB'deki sorumlu kişi"ye onun adını/adresini yaz.
 4. `.env` içinde `ADMIN_PASSWORD`'u değiştir.
 5. Kartla ödeme istersen: [Stripe](https://dashboard.stripe.com) → `STRIPE_SECRET_KEY` (önce `sk_test_...` ile dene, test kartı 4242 4242 4242 4242).
+6. **Stripe webhook** (canlı kart ödemesinden önce şart): Stripe → Developers → Webhooks → *Add endpoint*:
+   - Adres: `https://SENIN-ALAN-ADIN/api/stripe/webhook` (`PUBLIC_URL` + `/api/stripe/webhook`)
+   - Olaylar: `checkout.session.completed`, `checkout.session.expired`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`
+   - Gösterilen *Signing secret*'ı (`whsec_...`) `.env` içine `STRIPE_WEBHOOK_SECRET` olarak yaz ve siteyi yeniden başlat.
+   - Böylece müşteri ödeme sonrası siteye dönmese bile ödeme hemen kaydedilir. Site her olayda imzayı kontrol eder ve ödemeyi Stripe'a sorarak doğrular; tutar ya da para birimi siparişle uyuşmazsa ödemeyi kaydetmez, siparişte uyarı gösterir.
+   - Bilgisayarında denemek için (test modu): [Stripe CLI](https://docs.stripe.com/stripe-cli) ile `stripe listen --forward-to localhost:3300/api/stripe/webhook`. Komutun verdiği `whsec_...` değerini `STRIPE_WEBHOOK_SECRET` yap.
 
 ## Yayına alma
 
@@ -134,6 +140,7 @@ Yayına aldıktan sonra:
 | `ADMIN_PASSWORD` | Panel şifresi |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | E-posta |
 | `STRIPE_SECRET_KEY` | Kart ödemesi (boşsa kart kapalı) |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook imza anahtarı (`whsec_...`). Kart ödemesi açıksa canlıda **şart** (yukarıda: İlk yapılacaklar 6) |
 | `PUBLIC_URL` | Sitenin adresi, ör. `https://vornetic.com` (e-posta linkleri, Stripe, sitemap). **Canlıda zorunlu**, `https://` ile ve yolsuz |
 | `NODE_ENV=production` | Canlıda ayarla (güvenli çerezler, HSTS, `PUBLIC_URL` kontrolü) |
 | `PORT` | Varsayılan 3300 |
