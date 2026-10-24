@@ -20,14 +20,21 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONF="${BACKUP_CONF:-$APP_DIR/scripts/backup.env}"
 # shellcheck disable=SC1090
 if [ -f "$CONF" ]; then . "$CONF"; fi
-DATA_DIR="${DATA_DIR:-$APP_DIR/data}"
-# an absolute path (DATA_DIR may be relative, e.g. "data"): tar -C below changes directory twice
-[ -d "$DATA_DIR" ] || { echo "OFF-SITE BACKUP FAILED: data folder not found: $DATA_DIR" >&2; exit 1; }
-DATA_DIR="$(cd "$DATA_DIR" && pwd)"
-BACKUPS="$DATA_DIR/backups"
 AGE_BIN="${AGE_BIN:-age}"
 RCLONE_BIN="${RCLONE_BIN:-rclone}"
 NODE_BIN="${NODE_BIN:-node}"
+# The shop's data folder, decided exactly as the shop decides it: npm start runs
+# "node --env-file-if-exists=.env" in the app folder, so DATA_DIR comes from the environment, else
+# from the app's .env, else it is data/; a relative one is taken from the app folder. Cron passes
+# none of the shop's environment, so the same Node command reads it here: .env is parsed by Node's
+# own .env reader, never run as shell code. (Set DATA_DIR in .env only, not in backup.env.)
+if [ -n "${DATA_DIR:-}" ]; then export DATA_DIR; fi
+DATA_DIR="$(cd "$APP_DIR" && "$NODE_BIN" --env-file-if-exists=.env -e \
+  'process.stdout.write(require("path").resolve(process.env.DATA_DIR || "data"))')" \
+  || { echo "OFF-SITE BACKUP FAILED: could not read the data folder setting ($APP_DIR/.env)" >&2; exit 1; }
+[ -d "$DATA_DIR" ] || { echo "OFF-SITE BACKUP FAILED: data folder not found: $DATA_DIR" >&2; exit 1; }
+DATA_DIR="$(cd "$DATA_DIR" && pwd)"   # (absolute: tar -C below changes directory twice)
+BACKUPS="$DATA_DIR/backups"
 KEEP_DAYS="${BACKUP_KEEP_DAYS:-30}"
 MODE=full
 case "${1:-}" in

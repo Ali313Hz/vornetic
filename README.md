@@ -143,6 +143,8 @@ Yayına aldıktan sonra:
    - Ör. Google Drive, OneDrive, Backblaze B2. Ücretsiz kotalar sağlayıcıya göre değişir; güncel koşullara bak.
    - Verdiğin isim, ör. `gdrive`, aşağıda kullanılır.
 4. `cp scripts/backup.env.example scripts/backup.env`, sonra `AGE_RECIPIENT=age1...` (1. adımdaki açık anahtar) ve `RCLONE_REMOTE=gdrive:vornetic-yedek` değerlerini yaz.
+   - **Veri klasörü:** betik onu sitenin bulduğu gibi bulur: önce ortam değişkeni, sonra sitenin `.env` dosyasındaki `DATA_DIR` (göreli ise site klasörüne göre), yoksa `data/`. Böylece cron'dan çalışınca da aynı klasörü yedekler. `DATA_DIR`'i sadece `.env` içine yaz, `backup.env` içine yazma. `.env` kabuk kodu olarak çalıştırılmaz; Node'un kendi `.env` okuyucusuyla okunur.
+   - Cron `node`'u bulamazsa (ör. nvm ile kurulduysa), `backup.env` içine tam yolunu yaz: `NODE_BIN=/yol/node`.
 5. Dene: `scripts/backup-offsite.sh` (en sonda "Off-site backup OK" yazmalı; dosya bulut deposunda görünmeli).
 6. Zamanla (`crontab -e`). Her saat yalnız veritabanı, her gece fotoğraflarla birlikte tam yedek:
    ```

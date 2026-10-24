@@ -119,8 +119,17 @@ test('restore-check: a good snapshot passes; garbage, a damaged file or missing 
 });
 
 // ---------- backup-offsite.sh with fake age / rclone ----------
-function offsite({ args = [], env = {}, setup, relativeDataDir = false } = {}) {
+// Runs the script from a throwaway copy of the app (scripts/ + optional .env), never from this
+// repository, so no test can touch the real data/ folder next to the code.
+//   dataAt:   where the data folder is (default: the app's own data/, like the shop's default)
+//   dotenv:   contents of the app's .env (what the shop reads with npm start)
+//   dataDirEnv: DATA_DIR in the environment: 'abs' (default), 'relative' ("data"), or 'none' (cron)
+function offsite({ args = [], env = {}, setup, dataAt, dotenv, dataDirEnv = 'abs', cwd } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vornetic-test-'));
+  const app = path.join(dir, 'app');
+  fs.mkdirSync(path.join(app, 'scripts'), { recursive: true });
+  for (const f of ['backup-offsite.sh', 'restore-check.js']) fs.copyFileSync(path.join(ROOT, 'scripts', f), path.join(app, 'scripts', f));
+  if (dotenv !== undefined) fs.writeFileSync(path.join(app, '.env'), typeof dotenv === 'function' ? dotenv(dir) : dotenv);
   const remote = path.join(dir, 'remote'), log = path.join(dir, 'rclone.log');
   const age = path.join(dir, 'fake-age'), rclone = path.join(dir, 'fake-rclone');
   fs.writeFileSync(age, `#!/usr/bin/env bash
@@ -136,7 +145,7 @@ case "$1" in
   copy) if [ -n "\${FAKE_RCLONE_FAIL:-}" ]; then exit 1; fi; mkdir -p "$FAKE_REMOTE_DIR"; cp "$2" "$FAKE_REMOTE_DIR/";;
 esac
 `, { mode: 0o755 });
-  const data = path.join(dir, 'data');
+  const data = dataAt ? dataAt(dir) : path.join(app, 'data');
   fs.mkdirSync(path.join(data, 'backups'), { recursive: true });
   fs.mkdirSync(path.join(data, 'uploads'), { recursive: true });
   fs.writeFileSync(path.join(data, 'uploads', 'photo-1.jpg'), 'fake photo bytes');
@@ -145,10 +154,14 @@ esac
   if (setup) setup(data);
   const conf = path.join(dir, 'backup.env');
   fs.writeFileSync(conf, 'AGE_RECIPIENT=age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs0w4kz\nRCLONE_REMOTE=fake:vornetic-backups\nBACKUP_KEEP_DAYS=30\n');
-  const r = spawnSync(BASH, [slash(path.join(ROOT, 'scripts', 'backup-offsite.sh')), ...args], {
+  const childEnv = { ...process.env };
+  delete childEnv.DATA_DIR;                         // (this test file sets one for db.js)
+  if (dataDirEnv === 'abs') childEnv.DATA_DIR = slash(data);
+  if (dataDirEnv === 'relative') childEnv.DATA_DIR = 'data';
+  const r = spawnSync(BASH, [slash(path.join(app, 'scripts', 'backup-offsite.sh')), ...args], {
     encoding: 'utf8',
-    cwd: dir,                                       // relativeDataDir: DATA_DIR=data, as an .env may say
-    env: { ...process.env, BACKUP_CONF: slash(conf), DATA_DIR: relativeDataDir ? 'data' : slash(data), AGE_BIN: slash(age), RCLONE_BIN: slash(rclone),
+    cwd: cwd ? cwd(dir) : dir,                      // not the app folder: cron starts elsewhere
+    env: { ...childEnv, BACKUP_CONF: slash(conf), AGE_BIN: slash(age), RCLONE_BIN: slash(rclone),
       NODE_BIN: slash(process.execPath), FAKE_RCLONE_LOG: slash(log), FAKE_REMOTE_DIR: slash(remote), ...env },
   });
   const uploaded = fs.existsSync(remote) ? fs.readdirSync(remote) : [];
@@ -227,7 +240,7 @@ test('admin panel data: /api/admin/me reports the snapshot made at start; no war
 
 // ---------- Codex findings on 73840d3 ----------
 test('off-site: a relative DATA_DIR (e.g. "data") works for the full backup too', { skip: !hasBash && 'bash not available' }, () => {
-  const r = offsite({ relativeDataDir: true });
+  const r = offsite({ dataDirEnv: 'relative' });    // relative to the app folder, as for the shop
   try {
     assert.strictEqual(r.status, 0, r.stderr + r.stdout);
     const files = r.contents(r.uploaded[0]).files;
@@ -268,4 +281,50 @@ test('status: the warning follows the last FULL off-site backup (database + phot
     write('offsite-last-ok', Date.now() - 50 * 3600e3);
     assert.strictEqual(backupStatus().offsite_stale, true, 'no copy at all for 50 hours: warn');
   } finally { rm('offsite-last-ok'); rm('offsite-full-last-ok'); }
+});
+
+// ---------- Codex finding on c419305: cron doesn't inherit the shop's .env ----------
+test('cron-like run (no DATA_DIR in the environment): uses DATA_DIR from the app .env, like the shop', { skip: !hasBash && 'bash not available' }, () => {
+  // the shop's .env points at a custom folder outside the app; cron passes no DATA_DIR at all
+  const custom = dir => path.join(dir, 'shop-data');
+  const r = offsite({ dataAt: custom, dataDirEnv: 'none', dotenv: dir => `# shop settings\nPORT=3300\nDATA_DIR=${slash(custom(dir))}\n` });
+  try {
+    assert.strictEqual(r.status, 0, r.stderr + r.stdout);
+    assert.ok(r.ok, 'success recorded in the custom data folder');
+    const files = r.contents(r.uploaded[0]).files;
+    assert.ok(files.some(f => /^store-.*T\d{2}\.db$/.test(f)) && files.some(f => /uploads\/photo-1\.jpg$/.test(f)), files.join());
+  } finally { r.cleanup(); }
+});
+
+test('cron-like run: a relative DATA_DIR in .env is taken from the app folder, wherever cron starts', { skip: !hasBash && 'bash not available' }, () => {
+  const r = offsite({ dataAt: dir => path.join(dir, 'app', 'custom-data'), dataDirEnv: 'none', dotenv: 'DATA_DIR=custom-data\n',
+    cwd: dir => { fs.mkdirSync(path.join(dir, 'elsewhere'), { recursive: true }); return path.join(dir, 'elsewhere'); } });
+  try {
+    assert.strictEqual(r.status, 0, r.stderr + r.stdout);
+    assert.ok(r.ok);
+  } finally { r.cleanup(); }
+});
+
+test('cron-like run without any DATA_DIR: the app default data/ folder (like the shop)', { skip: !hasBash && 'bash not available' }, () => {
+  const r = offsite({ dataDirEnv: 'none' });         // no .env at all
+  try {
+    assert.strictEqual(r.status, 0, r.stderr + r.stdout);
+    assert.ok(r.ok);
+  } finally { r.cleanup(); }
+});
+
+test('.env is read as settings, never run as shell code', { skip: !hasBash && 'bash not available' }, () => {
+  const marker = dir => path.join(dir, 'PWNED');
+  let r;
+  r = offsite({ dataDirEnv: 'none', dotenv: '' });   // created first, to know the folder
+  const dir = r.dir;
+  try {
+    fs.writeFileSync(path.join(dir, 'app', '.env'), `X=$(touch "${slash(marker(dir))}")\n\`touch "${slash(marker(dir))}"\`\ntouch "${slash(marker(dir))}"\nDATA_DIR=data\n`);
+    const again = spawnSync(BASH, [slash(path.join(dir, 'app', 'scripts', 'backup-offsite.sh'))], { encoding: 'utf8', cwd: dir,
+      env: (() => { const e = { ...process.env, BACKUP_CONF: slash(path.join(dir, 'backup.env')), AGE_BIN: slash(path.join(dir, 'fake-age')),
+        RCLONE_BIN: slash(path.join(dir, 'fake-rclone')), NODE_BIN: slash(process.execPath), FAKE_RCLONE_LOG: slash(path.join(dir, 'rclone.log')),
+        FAKE_REMOTE_DIR: slash(path.join(dir, 'remote')) }; delete e.DATA_DIR; return e; })() });
+    assert.strictEqual(again.status, 0, again.stderr + again.stdout);
+    assert.ok(!fs.existsSync(marker(dir)), 'nothing in .env was executed');
+  } finally { r.cleanup(); }
 });
