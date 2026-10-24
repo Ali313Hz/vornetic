@@ -25,8 +25,9 @@ async function shop() {
     stock: () => q('SELECT stock FROM products WHERE id = ?', product)[0].stock,
     orders: () => q('SELECT ref, status, payment_method, checkout_id FROM orders ORDER BY id'),
     // what the shop page sends: the cart, the form, and (now) the checkout attempt's ID
-    place: (payment_method, { qty = 1, checkout_id, email = CUSTOMER.email } = {}) =>
-      srv.call('POST', '/api/orders', { ...CUSTOMER, email, payment_method, items: [{ id: product, qty }], ...(checkout_id !== undefined && { checkout_id }) }),
+    place: (payment_method, { qty = 1, checkout_id, email = CUSTOMER.email, extra = {} } = {}) =>
+      srv.call('POST', '/api/orders', { ...CUSTOMER, email, payment_method, items: [{ id: product, qty }], ...extra, ...(checkout_id !== undefined && { checkout_id }) }),
+    product,
     async close() { await srv.stop(); await smtp.close(); await stripe.close(); },
   };
   await smtp.waitFor(0);
@@ -224,4 +225,74 @@ test('the server stops while Stripe is opening the payment page: after the resta
       } finally { d.close(); }
     } finally { await srv.stop(); }
   } finally { await stripe.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---------- Codex findings on 14263fb ----------
+test('the same checkout ID with a different address, name, phone, city, province or notes is refused (409), not silently answered', async () => {
+  const s = await shop();
+  try {
+    const id = newId();
+    const first = await s.place('bizum', { checkout_id: id, extra: { notes: 'leave at the door' } });
+    assert.strictEqual(first.status, 200);
+    for (const changed of [{ address: 'Otra calle 9' }, { customer_name: 'Someone Else' }, { phone: '699999999' },
+      { city: 'Toledo' }, { province: 'Toledo' }, { notes: 'ring twice' }]) {
+      const r = await s.place('bizum', { checkout_id: id, extra: { notes: 'leave at the door', ...changed } });
+      assert.deepStrictEqual([r.status, r.body.error], [409, 'checkout_changed'], JSON.stringify(changed));
+    }
+    // unchanged (only spaces around the values differ): the same order
+    const same = await s.place('bizum', { checkout_id: id, extra: { notes: '  leave at the door ', address: ' ' + require('./helpers').CUSTOMER.address + ' ' } });
+    assert.deepStrictEqual([same.status, same.body.ref], [200, first.body.ref], JSON.stringify(same.body));
+    assert.strictEqual(s.orders().length, 1);
+  } finally { await s.close(); }
+});
+
+test('a product deleted while Stripe is opening the payment page: no order, the unused page is closed', async () => {
+  const s = await shop();
+  try {
+    s.stripe.state.createDelayMs = 800;
+    const pending = s.place('card', { qty: 2, checkout_id: newId() });
+    for (let i = 0; i < 100 && !s.stripe.state.createsStarted; i++) await sleep(20);
+    assert.strictEqual((await s.srv.admin('DELETE', '/api/admin/products/' + s.product)).status, 200);   // removed meanwhile
+    const r = await pending;
+    assert.strictEqual(r.status, 400, JSON.stringify(r.body));
+    assert.match(r.body.error, /no longer available/);
+    assert.deepStrictEqual(s.orders(), [], 'no payable order for a removed product');
+    for (let i = 0; i < 50 && !s.stripe.state.expires; i++) await sleep(50);
+    const sess = Object.values(s.stripe.state.sessions)[0];
+    assert.deepStrictEqual([s.stripe.state.expires, sess.status], [1, 'expired'], 'the unused payment page is closed');
+  } finally { await s.close(); }
+});
+
+test('a repeat after the payment page expired: Stripe is asked, the old order is released once, and a new attempt works', async () => {
+  const s = await shop();
+  try {
+    const id = newId();
+    const first = await s.place('card', { qty: 3, checkout_id: id });
+    assert.strictEqual(s.stock(), 7);
+    Object.assign(Object.values(s.stripe.state.sessions)[0], { status: 'expired', payment_status: 'unpaid' });   // an hour later
+    const r = await s.place('card', { qty: 3, checkout_id: id });
+    assert.deepStrictEqual([r.status, r.body.error], [409, 'checkout_ended'], 'not sent to the expired page: ' + JSON.stringify(r.body));
+    assert.deepStrictEqual({ ...s.q('SELECT status, auto_cancel_reason FROM orders WHERE ref = ?', first.body.ref)[0] },
+      { status: 'cancelled', auto_cancel_reason: 'card_checkout_expired' });
+    assert.strictEqual(s.stock(), 10, 'its stock returned');
+    assert.strictEqual((await s.place('card', { qty: 3, checkout_id: id })).status, 409, 'asked again: still ended');
+    assert.strictEqual(s.stock(), 10, 'returned once');
+    const fresh = await s.place('card', { qty: 3, checkout_id: newId() });    // the page starts a new attempt
+    assert.ok(fresh.body.redirect);
+    assert.deepStrictEqual([s.orders().length, s.stock()], [2, 7]);
+  } finally { await s.close(); }
+});
+
+test('a repeat whose payment went through at Stripe meanwhile: recorded once, answered "paid", never sent to pay again', async () => {
+  const s = await shop();
+  try {
+    const id = newId();
+    const first = await s.place('card', { qty: 1, checkout_id: id });
+    Object.assign(Object.values(s.stripe.state.sessions)[0], { status: 'complete', payment_status: 'paid' });
+    const r = await s.place('card', { qty: 1, checkout_id: id });
+    assert.deepStrictEqual([r.status, r.body.ref, r.body.paid, r.body.redirect], [200, first.body.ref, true, undefined]);
+    const r2 = await s.place('card', { qty: 1, checkout_id: id });
+    assert.deepStrictEqual([r2.body.paid, s.orders().length, s.stock()], [true, 1, 9]);
+    assert.strictEqual(s.q('SELECT paid_via FROM orders')[0].paid_via, 'stripe');
+  } finally { await s.close(); }
 });

@@ -852,7 +852,10 @@ async function viewCheckout() {
   const fromAccount = ME ? Object.fromEntries(Object.entries({
     email: ME.email, phone: ME.phone, customer_name: ME.name, address: ME.address, zip: ME.zip, city: ME.city,
     province: ME.province, country: ME.country }).filter(([, v]) => v)) : {};
-  const saved = { ...store.get('vaddr', {}), ...fromAccount };
+  // a checkout attempt still waiting (e.g. back from the Stripe page): its form comes back exactly as
+  // sent — ahead of the account's details — so paying again continues the same attempt and order
+  const pending = (store.get('vcheckout', null) || {}).fields || {};
+  const saved = { ...store.get('vaddr', {}), ...fromAccount, ...pending };
   const methods = ['card', 'bizum', 'transfer', 'contact'].filter(m => CONFIG.payments[m]);
   const cancelled = new URLSearchParams(location.search).has('cancelled');
   const f = (name, label, attrs = '') => `<label class="f"><span>${esc(label)}</span><input class="in" name="${name}" value="${esc(saved[name] || '')}" ${attrs}></label>`;
@@ -874,11 +877,11 @@ async function viewCheckout() {
             <label class="f"><span>${esc(t('country'))}</span><select class="in" name="country">
               ${CONFIG.countries.map(c => `<option value="${c}"${(saved.country || 'ES') === c ? ' selected' : ''}>${esc(t('countries')[c] || c)}</option>`).join('')}
             </select></label></div>
-          <label class="f" style="margin:0"><span>${esc(t('notes'))}</span><textarea class="in" name="notes" maxlength="500">${esc((store.get('vcheckout', null) || {}).notes || '')}</textarea></label>
+          <label class="f" style="margin:0"><span>${esc(t('notes'))}</span><textarea class="in" name="notes" maxlength="500">${esc(saved.notes || '')}</textarea></label>
           <p class="muted small" style="margin:10px 0 0">${esc(t('zip_hint'))}</p>
         </div>
         <div class="box"><h3>${esc(t('payment'))}</h3>
-          <div class="pay">${methods.map((m, i) => `<label><input type="radio" name="payment_method" value="${m}" ${i ? '' : 'checked'}>
+          <div class="pay">${methods.map((m, i) => `<label><input type="radio" name="payment_method" value="${m}" ${(methods.includes(saved.payment_method) ? m === saved.payment_method : !i) ? 'checked' : ''}>
             <span><b style="font-weight:600">${esc(t('pay_' + m))}</b><small>${esc(t('pay_' + m + '_s'))}</small></span></label>`).join('')}</div>
         </div>
       </div>
@@ -951,12 +954,17 @@ async function viewCheckout() {
 // the same, also after coming back from the Stripe page. The server answers a repeat of the same
 // attempt with the order it already made, so a double click, a refresh, a second tab or "back" from
 // Stripe never makes a second order. Only a short hash of the cart and form is stored, not the data.
-// The attempt also keeps the order notes: they are not in the saved delivery details, and the
-// checkout page puts them back, so coming back from Stripe gives the same form — the same attempt.
+// The attempt also keeps the form as sent (delivery details, notes, payment method): the checkout
+// page puts it back ahead of the account's details, so coming back from Stripe gives the same form —
+// the same attempt. Cleared once the order is placed or paid.
 function checkoutAttempt(body) {
   const fp = hashText(JSON.stringify(body));
   let a = store.get('vcheckout', null);
-  if (!a || a.fp !== fp || !a.id) { a = { id: newCheckoutId(), fp, notes: body.notes || '' }; store.set('vcheckout', a); }
+  if (!a || a.fp !== fp || !a.id) {
+    const { items, lang, ...fields } = body;
+    a = { id: newCheckoutId(), fp, fields };
+    store.set('vcheckout', a);
+  }
   return a.id;
 }
 const newCheckoutId = () => crypto.randomUUID ? crypto.randomUUID()

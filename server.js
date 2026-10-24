@@ -678,11 +678,15 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
     // retry after a lost answer): answer with the order already made instead of a second order.
     // Checked FIRST, before the catalogue and stock checks meant for new orders: the first request
     // may have taken the last unit, or the product may be gone since; its order still stands.
+    // The attempt is bound to everything that was ordered and where it goes (as saved, i.e. trimmed):
+    // the same ID with any other delivery detail, note, payment method or cart is refused, never
+    // answered with an order that has different details.
     const checkoutId = CHECKOUT_ID.test(String(b.checkout_id || '')) ? b.checkout_id : null;
-    const checkoutHash = checkoutId && crypto.createHash('sha256').update(JSON.stringify([email.toLowerCase(), method, country, zip,
+    const checkoutHash = checkoutId && crypto.createHash('sha256').update(JSON.stringify([email.toLowerCase(), method,
+      name, phone, address, city, zip, province, country, str(b.notes, 500),
       b.items.map(i => [i && i.id, i && i.qty, i && i.options, i && i.car])])).digest('hex');
     const again = () => repeatCheckout(db.prepare('SELECT * FROM orders WHERE checkout_id = ?').get(checkoutId), checkoutHash, s, res);
-    if (checkoutId && db.prepare('SELECT 1 FROM orders WHERE checkout_id = ?').get(checkoutId)) return again();
+    if (checkoutId && db.prepare('SELECT 1 FROM orders WHERE checkout_id = ?').get(checkoutId)) return await again();
     // this attempt is opening its Stripe payment page right now (a request still running here)
     if (checkoutId && checkoutsOpening.has(checkoutId)) return res.status(409).json({ error: 'checkout_in_progress' });
 
@@ -714,6 +718,11 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
     let info;
     try {
       info = inTransaction(() => {
+        // Card: Stripe was asked first (an await), so the cart is checked again here, in the same
+        // transaction that takes the stock: a product removed (or changed) meanwhile means no order —
+        // never a payable order for something no longer sold, nor one that differs from the page.
+        if (session && JSON.stringify(b.items.map(cleanLine)) !== JSON.stringify(items))
+          throw new Error('Your cart changed while the payment page was being prepared. Please check it and try again.');
         takeStock(items, (p, qty) => `Not enough stock: ${p.name_en} (only ${p.stock} left, you asked for ${qty})`);
         return db.prepare(`INSERT INTO orders
           (ref, user_id, customer_name, email, phone, address, city, zip, province, country, notes, items,
@@ -728,7 +737,7 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
       // meanwhile): close it, so it can't be paid
       if (session) closeStripeSession(session.id);
       // the same attempt was saved meanwhile (unique checkout_id): its stock was taken once, by that one
-      if (checkoutId && /UNIQUE/i.test(e.message)) return again();
+      if (checkoutId && /UNIQUE/i.test(e.message)) return await again();
       throw e;
     }
 
@@ -762,14 +771,31 @@ function closeStripeSession(id) {
 // the first request did that. Refused (409) when the attempt can't be continued, so the shop page
 // starts a new one: what was ordered changed ('checkout_changed') or the order ended, e.g. its card
 // payment page expired ('checkout_ended'). 'checkout_in_progress': a card order without its payment
-// page (only orders saved before pages were made first can look like this).
-function repeatCheckout(o, hash, s, res) {
+// page (only orders saved before pages were made first can look like this), or whose page Stripe
+// reports as neither open nor final.
+// An unpaid card order's page is checked with Stripe before it is handed back (it may have expired
+// after an hour, or been paid meanwhile): the same decision as the webhook and the 15-minute check
+// (applyStripeSession), so a payment is recorded once and an expired order released once. If
+// Stripe can't be reached, the page is handed back as before.
+async function repeatCheckout(o, hash, s, res) {
   if (!o || o.checkout_hash !== hash) return res.status(409).json({ error: 'checkout_changed' });
   if (o.status === 'cancelled') return res.status(409).json({ error: 'checkout_ended' });
   if (o.payment_method === 'card') {
-    if (o.paid_at) return res.json({ ok: true, ref: o.ref, status: o.status, paid: true, total_cents: o.total_cents, payment_method: 'card' });
+    const paid = x => res.json({ ok: true, ref: x.ref, status: x.status, paid: true, total_cents: x.total_cents, payment_method: 'card' });
+    if (o.paid_at) return paid(o);
     if (!o.stripe_url) return res.status(409).json({ error: 'checkout_in_progress' });
-    return res.json({ ok: true, ref: o.ref, redirect: o.stripe_url });
+    let sess;
+    try { sess = await stripeSession(o.stripe_session); }
+    catch (e) {
+      console.error(`Could not check the Stripe page of ${o.ref}:`, e.message);
+      return res.json({ ok: true, ref: o.ref, redirect: o.stripe_url });
+    }
+    if (applyStripeSession(o, sess).paid) flushMails();
+    const now = db.prepare('SELECT * FROM orders WHERE id = ?').get(o.id);
+    if (now.paid_at) return paid(now);
+    if (now.status === 'cancelled') return res.status(409).json({ error: 'checkout_ended' });
+    if (sess.status === 'open') return res.json({ ok: true, ref: o.ref, redirect: o.stripe_url });
+    return res.status(409).json({ error: 'checkout_in_progress' });
   }
   res.json({ ok: true, ref: o.ref, total_cents: o.total_cents, payment_method: o.payment_method, ...paymentInfo(s, o.payment_method) });
 }
