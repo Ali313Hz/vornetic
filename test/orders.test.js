@@ -114,7 +114,7 @@ async function fakeStripe() {
         if (state.failCreate) return send(401, { error: { message: 'Invalid API Key provided: sk_test_****tests' } });
         return send(200, { id: 'cs_test_' + state.creates, url: 'https://checkout.example.test/pay/' + state.creates });
       }
-      const m = req.url.match(/^\/v1\/checkout\/sessions\/([\w]+)$/);
+      const m = req.url.match(/^\/v1\/checkout\/sessions\/([\w]+)(\?.*)?$/);   // (?expand[]=… allowed)
       if (req.method === 'GET' && m) {
         state.gets++;
         await sleep(state.getDelayMs);

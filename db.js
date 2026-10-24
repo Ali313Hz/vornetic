@@ -137,6 +137,25 @@ for (const sql of [
   'ALTER TABLE orders ADD COLUMN paid_via TEXT',
   // 1 = cancelled before payment dates were stored: nobody knows if it was paid; the admin checks
   'ALTER TABLE orders ADD COLUMN payment_unknown INTEGER NOT NULL DEFAULT 0',
+  // Set when the shop cancels an unpaid order automatically: when, and why
+  // ('unpaid_5_days' = Bizum/transfer not paid in 5 days, 'card_checkout_expired' = Stripe page expired unpaid)
+  'ALTER TABLE orders ADD COLUMN auto_cancelled_at TEXT',
+  'ALTER TABLE orders ADD COLUMN auto_cancel_reason TEXT',
+  // Set when a Bizum/transfer order is still unpaid after 5 days. Nothing is cancelled automatically:
+  // the admin checks the bank/Bizum and either marks it paid or confirms the cancellation.
+  'ALTER TABLE orders ADD COLUMN overdue_at TEXT',
+  // Last time an unpaid card order was checked with Stripe (the check goes oldest-checked first)
+  'ALTER TABLE orders ADD COLUMN stripe_checked_at TEXT',
+  // A Bizum/transfer payment that arrived after the order was cancelled: when the admin recorded it
+  // (paid_at = the day the money arrived; the order stays cancelled and a refund is due)
+  'ALTER TABLE orders ADD COLUMN late_payment_recorded_at TEXT',
+  // Set once Stripe has given a final answer for the card order's payment page (paid, or expired
+  // unpaid): a cancelled card order is checked with Stripe until then, in case the customer paid anyway
+  'ALTER TABLE orders ADD COLUMN stripe_done_at TEXT',
+  // Set while the shop is asking Stripe to close the payment page of a cancelled card order: the
+  // order can't be reinstated until that request is over (see expireCancelledSession)
+  'ALTER TABLE orders ADD COLUMN stripe_expiring_at TEXT',
+  'ALTER TABLE orders ADD COLUMN stripe_expiring_token TEXT',   // which close attempt holds that claim
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 
 // Payment date. Runs once, when the column is added. Orders already paid/shipped/delivered get
@@ -162,6 +181,24 @@ CREATE TABLE IF NOT EXISTS refunds (
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_refunds_order ON refunds(order_id);
+
+-- E-mails about an order that must not be lost (card payment confirmations, "payment not
+-- received"). Queued in the same transaction as the change they report, sent right after and
+-- retried if the mail server fails. state: due → sending → sent | failed (gave up) | dropped
+-- (no longer true, e.g. the order was reinstated) | skipped (no address). One per order and kind.
+CREATE TABLE IF NOT EXISTS mail_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'due',
+  tries INTEGER NOT NULL DEFAULT 0,
+  claimed_at TEXT,
+  sent_at TEXT,
+  next_try_at TEXT,          -- earliest time a failed e-mail may be tried again (NULL = now: new ones go out at once)
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE (order_id, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_mail_outbox_state ON mail_outbox(state);
 
 -- The admin's answers to "was this old cancelled order paid?" ('paid' | 'unpaid'), each with
 -- its date. Rows are only added: a corrected answer is a new row, so every decision stays visible.
@@ -197,6 +234,8 @@ CREATE INDEX IF NOT EXISTS idx_orders_paid_at ON orders(paid_at);
 CREATE INDEX IF NOT EXISTS idx_refunds_created ON refunds(created_at);
 `);
 db.exec('CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id)');
+// mail_outbox tables made before next_try_at existed (the table is created above, after the order migrations)
+try { db.exec('ALTER TABLE mail_outbox ADD COLUMN next_try_at TEXT'); } catch { /* already there */ }
 
 // ---------- Default settings (editable from /admin → Settings) ----------
 const DEFAULT_SETTINGS = {
