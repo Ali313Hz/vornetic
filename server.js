@@ -681,16 +681,31 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
     const total = subtotal + shipping;
     const ref = newRef();
 
+    // The same checkout attempt again (double click, refresh, a second tab, "back" from Stripe):
+    // answer with the order already made — before any stock is taken — instead of a second order.
+    const checkoutId = CHECKOUT_ID.test(String(b.checkout_id || '')) ? b.checkout_id : null;
+    const checkoutHash = checkoutId && crypto.createHash('sha256').update(JSON.stringify([email.toLowerCase(), method, country, zip,
+      b.items.map(i => [i && i.id, i && i.qty, i && i.options, i && i.car])])).digest('hex');
+    const again = () => repeatCheckout(db.prepare('SELECT * FROM orders WHERE checkout_id = ?').get(checkoutId), checkoutHash, s, res);
+    if (checkoutId && db.prepare('SELECT 1 FROM orders WHERE checkout_id = ?').get(checkoutId)) return again();
+
     // Save the order and take its stock together; not enough stock = no order at all
-    const info = inTransaction(() => {
-      takeStock(items, (p, qty) => `Not enough stock: ${p.name_en} (only ${p.stock} left, you asked for ${qty})`);
-      return db.prepare(`INSERT INTO orders
-        (ref, user_id, customer_name, email, phone, address, city, zip, province, country, notes, items,
-         subtotal_cents, shipping_cents, total_cents, payment_method, lang)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(ref, user ? user.id : null, name, email, phone, address, city, zip, province, country, str(b.notes, 500),
-          JSON.stringify(items), subtotal, shipping, total, method, lang);
-    });
+    let info;
+    try {
+      info = inTransaction(() => {
+        takeStock(items, (p, qty) => `Not enough stock: ${p.name_en} (only ${p.stock} left, you asked for ${qty})`);
+        return db.prepare(`INSERT INTO orders
+          (ref, user_id, customer_name, email, phone, address, city, zip, province, country, notes, items,
+           subtotal_cents, shipping_cents, total_cents, payment_method, lang, checkout_id, checkout_hash)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(ref, user ? user.id : null, name, email, phone, address, city, zip, province, country, str(b.notes, 500),
+            JSON.stringify(items), subtotal, shipping, total, method, lang, checkoutId, checkoutHash);
+      });
+    } catch (e) {
+      // the same attempt was saved meanwhile (unique checkout_id): its stock was taken once, by that one
+      if (checkoutId && /UNIQUE/i.test(e.message)) return again();
+      throw e;
+    }
 
     // Remember the address on the customer's account if they have none yet
     if (user && !user.address) {
@@ -705,13 +720,14 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
       } catch (err) {
         // No payment page = no sale: cancel the order and give its stock back
         console.error(`Stripe checkout failed for ${ref}:`, err.message);
+        // (the checkout attempt is freed too, so trying again makes a new order)
         inTransaction(() => {
-          const r = db.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ? AND status = 'pending'").run(info.lastInsertRowid);
+          const r = db.prepare("UPDATE orders SET status = 'cancelled', checkout_id = NULL WHERE id = ? AND status = 'pending'").run(info.lastInsertRowid);
           if (r.changes) returnStock(items);
         });
         throw new Error('Card payment is not available right now. Please try again or choose another payment method.');
       }
-      db.prepare('UPDATE orders SET stripe_session = ? WHERE id = ?').run(session.id, info.lastInsertRowid);
+      db.prepare('UPDATE orders SET stripe_session = ?, stripe_url = ? WHERE id = ?').run(session.id, session.url, info.lastInsertRowid);
       return res.json({ ok: true, ref, redirect: session.url });   // e-mails are sent once the card payment is confirmed
     }
     const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(info.lastInsertRowid);
@@ -722,6 +738,24 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
     res.status(400).json({ error: e.message });
   }
 });
+
+// A checkout ID from the shop page: random, 16–64 letters, digits or dashes (crypto.randomUUID)
+const CHECKOUT_ID = /^[A-Za-z0-9-]{16,64}$/;
+// The answer to a repeated checkout attempt, from the order it already made. No e-mails, no stock:
+// the first request did that. Refused (409) when the attempt can't be continued, so the shop page
+// starts a new one: what was ordered changed ('checkout_changed') or the order ended, e.g. its card
+// payment page expired ('checkout_ended'). 'checkout_in_progress': the first request is still
+// opening the Stripe page.
+function repeatCheckout(o, hash, s, res) {
+  if (!o || o.checkout_hash !== hash) return res.status(409).json({ error: 'checkout_changed' });
+  if (o.status === 'cancelled') return res.status(409).json({ error: 'checkout_ended' });
+  if (o.payment_method === 'card') {
+    if (o.paid_at) return res.json({ ok: true, ref: o.ref, status: o.status, paid: true, total_cents: o.total_cents, payment_method: 'card' });
+    if (!o.stripe_url) return res.status(409).json({ error: 'checkout_in_progress' });
+    return res.json({ ok: true, ref: o.ref, redirect: o.stripe_url });
+  }
+  res.json({ ok: true, ref: o.ref, total_cents: o.total_cents, payment_method: o.payment_method, ...paymentInfo(s, o.payment_method) });
+}
 
 // 'contact' = no payment set up yet: take the order and arrange payment by email/WhatsApp
 function availablePayments(s) {

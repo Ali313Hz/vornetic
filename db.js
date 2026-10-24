@@ -159,6 +159,14 @@ for (const sql of [
   // Set when Stripe says a card order was paid, but not this order's total in euros: the payment is
   // then NOT recorded automatically; the admin checks it in Stripe (shown on the order)
   'ALTER TABLE orders ADD COLUMN stripe_mismatch TEXT',
+  // One checkout attempt = one order: the shop page sends a random checkout_id with the order, and a
+  // repeat of the same attempt (double click, refresh, second tab, "back" from Stripe) gets the order
+  // already made. checkout_hash = what was ordered, so a changed cart can't reuse the attempt.
+  'ALTER TABLE orders ADD COLUMN checkout_id TEXT',
+  'ALTER TABLE orders ADD COLUMN checkout_hash TEXT',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_checkout ON orders(checkout_id) WHERE checkout_id IS NOT NULL',
+  // The card order's Stripe payment page, so a repeat of the checkout can send the customer back to it
+  'ALTER TABLE orders ADD COLUMN stripe_url TEXT',
 ]) { try { db.exec(sql); } catch { /* already there */ } }
 
 // Payment date. Runs once, when the column is added. Orders already paid/shipped/delivered get
