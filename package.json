@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
     "test": "node --test \"test/**/*.test.js\"",
-    "check:syntax": "node --check server.js && node --check db.js && node --check catalog.js && node --check mail.js && node --check stripe.js && node --check finance.js && node --check xlsx.js"
+    "restore-check": "node scripts/restore-check.js",
+    "check:syntax": "node --check server.js && node --check db.js && node --check catalog.js && node --check mail.js && node --check stripe.js && node --check finance.js && node --check xlsx.js && node --check scripts/restore-check.js"
   },
   "engines": {
     "node": ">=22.5"
