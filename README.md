@@ -137,6 +137,7 @@ Yayına aldıktan sonra:
 | `PUBLIC_URL` | Sitenin adresi, ör. `https://vornetic.com` (e-posta linkleri, Stripe, sitemap). **Canlıda zorunlu**, `https://` ile ve yolsuz |
 | `NODE_ENV=production` | Canlıda ayarla (güvenli çerezler, HSTS, `PUBLIC_URL` kontrolü) |
 | `PORT` | Varsayılan 3300 |
+| `CSP_REPORT_ONLY` | `1` yaparsan tarayıcı Content-Security-Policy'yi uygulamaz, sadece engelleyeceği şeyi konsolda bildirir. Sadece canlıda bir şey engellenirse geçici olarak kullan; normalde ayarlama |
 | `HOST` | Dinleme adresi. Canlıda varsayılan `127.0.0.1` (sadece Nginx üzerinden erişilir); genelde ayarlama |
 | `DATA_DIR` | Veritabanı/fotoğraf klasörü (varsayılan `./data`) |
 

@@ -29,6 +29,7 @@ const INHERITED_SETTINGS = ['PUBLIC_URL', 'HOST', 'SMTP_HOST', 'SMTP_PORT', 'SMT
 // In production the app only serves https requests, as reported by Nginx on the same machine.
 // Test requests come from 127.0.0.1 too, so they send the header Nginx would add.
 const VIA_PROXY = { 'X-Forwarded-Proto': 'https' };
+INHERITED_SETTINGS.push('CSP_REPORT_ONLY');   // (separate line: other open PRs extend the list above)
 
 async function startServer(env = {}, dataDir) {
   const ownDir = !dataDir;
