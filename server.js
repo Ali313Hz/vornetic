@@ -7,7 +7,7 @@ const multer = require('multer');
 const cookieParser = require('cookie-parser');
 const {
   db, today, getSettings,
-  hashPassword, checkPassword, loadCars, parseBulbs, backup, DATA_DIR,
+  hashPassword, checkPassword, loadCars, parseBulbs, backup, backupStatus, DATA_DIR,
 } = require('./db');
 const mail = require('./mail');
 const catalog = require('./catalog');
@@ -610,6 +610,8 @@ app.post('/api/admin/logout', (req, res) => {
 app.get('/api/admin/me', requireAdmin, (req, res) => res.json({
   ok: true, stripe: !!STRIPE_KEY, mail: mail.enabled,
   open_withdrawals: db.prepare('SELECT COUNT(*) c FROM withdrawals WHERE handled = 0').get().c,
+  // in production the panel warns when no backup has been copied off the server for 2 days
+  backup: (b => ({ ...b, warn: IS_PROD && b.offsite_stale }))(backupStatus()),
   upload: { photo_mb: MAX_PHOTO_MB, video_mb: MAX_VIDEO_MB, photo_ext: IMG_EXT, video_ext: VID_EXT },
 }));
 app.post('/api/admin/test-mail', requireAdmin, async (req, res) => {
@@ -1051,9 +1053,10 @@ app.get(/^\/(?!api|uploads).*/, (req, res) => {
   res.status(status).type('html').send(html);
 });
 
-// Daily database backup (data/backups, last 14 days)
+// Database snapshot every hour (data/backups: last 48 hours + one a day for 30 days). Taking them
+// off the server, encrypted, is scripts/backup-offsite.sh (cron, README → Yedek).
 backup();
-setInterval(backup, 6 * 3600 * 1000).unref();
+setInterval(() => backup(), 3600 * 1000).unref();
 
 // In production listen on this machine only: visitors reach the app through Nginx (https), never
 // directly over plain http. HOST can override it (e.g. HOST=0.0.0.0), but read the README first.

@@ -13,3 +13,6 @@ uploads/
 # Local only
 _old_version/
 .claude/
+
+# Off-site backup settings (scripts/backup.env.example shows what goes in)
+scripts/backup.env

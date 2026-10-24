@@ -123,9 +123,43 @@ Yayına aldıktan sonra:
 
 ## Yedek
 
-- Veritabanı her gün otomatik yedeklenir: `data/backups/` (son 14 gün).
-- Panelden yüklenen fotoğraflar: `data/uploads/`.
-- Tam yedek = `data/` klasörünü başka bir yere kopyalamak (ara sıra bir USB'ye/buluta at).
+**Sunucuda (otomatik):** veritabanının bir kopyası **her saat** `data/backups/` içine alınır: son 48 saatin hepsi ve 30 güne kadar her günden bir tane. Ama bunlar aynı diskte durur; disk ya da sunucu giderse bunlar da gider. Bu yüzden **sunucu dışına şifreli kopya şart.**
+
+### Sunucu dışına şifreli yedek (ücretsiz: `age` + `rclone`)
+`scripts/backup-offsite.sh` her çalıştığında:
+1. En yeni saatlik kopyayı **kontrol eder** (`restore-check`).
+2. Kopyayı ürün fotoğraflarıyla (`data/uploads/`) birlikte paketler.
+3. Paketi **senin açık anahtarınla şifreler** (`age`). Sunucu kendi yedeğini açamaz; sunucuya biri girse bile eski yedekleri okuyamaz.
+4. Şifreli dosyayı bulut depona kopyalar (`rclone`) ve oradaki eski dosyaları siler (varsayılan: 30 günden eski).
+
+Şifresiz hiçbir şey göndermez. Sorun olursa hata verir; panel de 2 gün boyunca başarılı yedek yoksa uyarı gösterir.
+
+**Kurulum (bir kez):**
+1. **Kendi bilgisayarında** (sunucuda değil) bir anahtar oluştur: `age-keygen -o vornetic-yedek-anahtari.txt`
+   - Ekranda çıkan `Public key: age1...` satırı açık anahtardır; sunucuya bu gider.
+   - Dosyanın kendisi (`AGE-SECRET-KEY-...`) özel anahtardır. **Sunucuya koyma.** İki ayrı yerde sakla (ör. şifre yöneticisi ve bir USB). Bu anahtar kaybolursa yedekler açılamaz.
+2. Sunucuda araçları kur (Ubuntu 22.04+ / Debian 12): `sudo apt install age rclone`
+3. Bulut depoyu bağla: `rclone config`
+   - Ör. Google Drive, OneDrive, Backblaze B2. Ücretsiz kotalar sağlayıcıya göre değişir; güncel koşullara bak.
+   - Verdiğin isim, ör. `gdrive`, aşağıda kullanılır.
+4. `cp scripts/backup.env.example scripts/backup.env`, sonra `AGE_RECIPIENT=age1...` (1. adımdaki açık anahtar) ve `RCLONE_REMOTE=gdrive:vornetic-yedek` değerlerini yaz.
+5. Dene: `scripts/backup-offsite.sh` (en sonda "Off-site backup OK" yazmalı; dosya bulut deposunda görünmeli).
+6. Zamanla (`crontab -e`). Her saat yalnız veritabanı, her gece fotoğraflarla birlikte tam yedek:
+   ```
+   20 * * * *  /yol/vornetic/scripts/backup-offsite.sh --db-only
+   40 3 * * *  /yol/vornetic/scripts/backup-offsite.sh
+   ```
+
+### Geri yükleme (ayda bir dene)
+1. Kendi bilgisayarında en yeni dosyayı indir: `rclone copy gdrive:vornetic-yedek/vornetic-full-...tar.gz.age .`
+2. Aç: `age -d -i vornetic-yedek-anahtari.txt vornetic-full-...tar.gz.age | tar xz`
+3. Kontrol et: `npm run restore-check -- store-....db` ("OK" ve ürün/sipariş sayıları görünmeli).
+4. Sunucuda:
+   1. Siteyi durdur: `pm2 stop vornetic`.
+   2. Eski `data/store.db*` dosyalarını bir kenara taşı.
+   3. Kopyayı `data/store.db` olarak koy; `uploads/` klasörünü `data/uploads/` yerine koy.
+   4. Başlat: `pm2 start vornetic`.
+   5. Sitede son siparişleri kontrol et.
 
 ## Ortam değişkenleri (`.env`)
 
