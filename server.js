@@ -80,11 +80,35 @@ app.disable('x-powered-by');
 // machine may tell us via X-Forwarded-Proto / X-Forwarded-For that the visitor used https and what
 // their IP is; a request from anywhere else can't fake those headers (they are ignored).
 app.set('trust proxy', 'loopback');
+// Content-Security-Policy: the browser runs scripts, loads fonts, images and video, and makes requests
+// only from this site itself. Nothing on the pages comes from elsewhere (the font is served here),
+// so this costs nothing, and HTML slipped into a page (e.g. through a product text) can't load or run
+// anything else. The pages use inline style="" attributes, so styles allow 'unsafe-inline'; scripts
+// don't (the pages have no inline scripts; JSON-LD is data, not run). Going to the Stripe payment
+// page is a normal navigation, which this doesn't restrict.
+// CSP_REPORT_ONLY=1: browsers only report (in the console) what they would block — an emergency
+// switch if something turns out to be blocked on the live site.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "media-src 'self'",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+  ...(IS_PROD ? ['upgrade-insecure-requests'] : []),
+].join('; ');
+const CSP_HEADER = process.env.CSP_REPORT_ONLY === '1' ? 'Content-Security-Policy-Report-Only' : 'Content-Security-Policy';
 app.use((req, res, next) => {
   res.set({
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'SAMEORIGIN',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
+    [CSP_HEADER]: CSP,
     // In production: browsers must use https for this site for the next year (only this host,
     // not subdomains, so a mail or other subdomain without https keeps working)
     ...(IS_PROD && { 'Strict-Transport-Security': 'max-age=31536000' }),
