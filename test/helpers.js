@@ -184,6 +184,10 @@ async function fakeStripe() {
     req.on('end', async () => {
       const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
       if (req.method === 'POST' && req.url === '/v1/checkout/sessions') {
+        // state.createDelayMs: Stripe is slow to make the page; state.failCreate: it refuses
+        state.createsStarted = (state.createsStarted || 0) + 1;      // (counted before the delay: "Stripe is being asked")
+        if (state.createDelayMs) await new Promise(r => setTimeout(r, state.createDelayMs));
+        if (state.failCreate) return send(500, { error: { message: 'fake Stripe error on create' } });
         const params = Object.fromEntries(new URLSearchParams(body));
         const id = 'cs_test_' + (++state.creates);
         state.sessions[id] = { ref: params.client_reference_id, params, status: 'open', payment_status: 'unpaid' };

@@ -294,7 +294,7 @@ test('un-cancelling without enough stock is refused and the order stays cancelle
 });
 
 // ---------- Card payments (fake Stripe) ----------
-test('if Stripe fails, the order is cancelled, stock comes back, and Stripe details stay hidden', async () => {
+test('if Stripe fails, no order is made, stock is untouched, and Stripe details stay hidden', async () => {
   const { srv, stripe, close } = await setup({ stripe: true });
   try {
     stripe.state.failCreate = true;
@@ -305,8 +305,8 @@ test('if Stripe fails, the order is cancelled, stock comes back, and Stripe deta
     assert.doesNotMatch(r.body.error, /API Key|sk_test/);
     assert.strictEqual(stripe.state.creates, 1);
     assert.strictEqual(stripe.state.lastAuth, `Bearer ${FAKE_STRIPE_KEY}`);
-    const [o] = await srv.orders();
-    assert.deepStrictEqual([o.status, o.paid_at, o.needs_refund], ['cancelled', null, 0]);
+    // the payment page is made before the order is saved: no page, no order (nothing to cancel)
+    assert.deepStrictEqual(await srv.orders(), []);
     assert.strictEqual(await srv.stock(p), 4);
   } finally { await close(); }
 });
