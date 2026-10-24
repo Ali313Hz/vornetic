@@ -103,22 +103,30 @@ async function startServer(env = {}, dataDir) {
 
 // Fake Stripe: POST /v1/checkout/sessions, GET /v1/checkout/sessions/:id
 async function fakeStripe() {
-  const state = { failCreate: false, paymentStatus: 'unpaid', getDelayMs: 0, creates: 0, gets: 0, lastAuth: null };
+  const state = { failCreate: false, paymentStatus: 'unpaid', getDelayMs: 0, creates: 0, gets: 0, lastAuth: null, sessions: {} };
   const server = http.createServer((req, res) => {
     state.lastAuth = req.headers.authorization;
     const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
-    req.resume();
+    let body = '';
+    req.on('data', d => { body += d; });
     req.on('end', async () => {
       if (req.method === 'POST' && req.url === '/v1/checkout/sessions') {
         state.creates++;
         if (state.failCreate) return send(401, { error: { message: 'Invalid API Key provided: sk_test_****tests' } });
+        // remember the order and the amount, like Stripe does (amount_total = the line items)
+        const p = new URLSearchParams(body);
+        let amount = 0;
+        for (let n = 0; p.has(`line_items[${n}][quantity]`); n++)
+          amount += Number(p.get(`line_items[${n}][quantity]`)) * Number(p.get(`line_items[${n}][price_data][unit_amount]`));
+        state.sessions['cs_test_' + state.creates] = { ref: p.get('client_reference_id'), amount };
         return send(200, { id: 'cs_test_' + state.creates, url: 'https://checkout.example.test/pay/' + state.creates });
       }
       const m = req.url.match(/^\/v1\/checkout\/sessions\/([\w]+)(\?.*)?$/);   // (?expand[]=… allowed)
       if (req.method === 'GET' && m) {
         state.gets++;
         await sleep(state.getDelayMs);
-        return send(200, { id: m[1], payment_status: state.paymentStatus });
+        const s = state.sessions[m[1]] || {};
+        return send(200, { id: m[1], client_reference_id: s.ref, payment_status: state.paymentStatus, amount_total: s.amount, currency: 'eur' });
       }
       send(404, { error: { message: 'not found' } });
     });
