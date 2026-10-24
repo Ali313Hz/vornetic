@@ -25,7 +25,7 @@ const freePort = () => new Promise((resolve, reject) => {
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'vornetic-test-'));
 // Server settings a test must never inherit from the environment it runs in
 const INHERITED_SETTINGS = ['PUBLIC_URL', 'HOST', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'MAIL_FROM',
-  'STRIPE_SECRET_KEY', 'STRIPE_API_URL', 'EXPIRY_BATCH', 'EXPIRY_REPLY_MS'];
+  'STRIPE_SECRET_KEY', 'STRIPE_API_URL', 'STRIPE_WEBHOOK_SECRET', 'EXPIRY_BATCH', 'EXPIRY_REPLY_MS'];
 // In production the app only serves https requests, as reported by Nginx on the same machine.
 // Test requests come from 127.0.0.1 too, so they send the header Nginx would add.
 const VIA_PROXY = { 'X-Forwarded-Proto': 'https' };
@@ -166,7 +166,10 @@ async function fakeSmtp() {
 
 // Fake Stripe (Checkout Sessions) on 127.0.0.1. Each created session can be steered:
 //   sessions[id] = { ref, params, status: 'open'|'expired'|'complete', payment_status: 'unpaid'|'paid',
-//                    fail: 500|401|'badjson'|null, delayMs, answerId, answerRef, chargeCreated }
+//                    fail: 500|401|'badjson'|null, delayMs, answerId, answerRef, chargeCreated,
+//                    amountTotal, currency }
+// Like real Stripe, a session answers with amount_total (the sum of its line items, in cents) and
+// currency; amountTotal / currency let a test make Stripe report a different amount.
 // answerId / answerRef let a test make Stripe answer with a different session or order.
 // chargeCreated (Unix seconds) = when Stripe took the money: returned as the successful charge
 // when the request expands payment_intent.latest_charge. state.getUrls lists every GET URL.
@@ -209,7 +212,10 @@ async function fakeStripe() {
         if (s.fail) return send(s.fail, { error: { message: 'fake Stripe error ' + s.fail } });
         const pi = !s.chargeCreated ? null : !expand.includes('payment_intent.latest_charge') ? 'pi_' + m[1]
           : { id: 'pi_' + m[1], status: 'succeeded', latest_charge: { id: 'ch_' + m[1], status: 'succeeded', paid: true, created: s.chargeCreated } };
-        return send(200, { id: s.answerId || m[1], client_reference_id: s.answerRef || s.ref, status: s.status, payment_status: s.payment_status, payment_intent: pi });
+        const lines = Object.keys(s.params).filter(k => /^line_items\[\d+\]\[quantity\]$/.test(k)).map(k => k.match(/\d+/)[0]);
+        const amount = lines.reduce((sum, n) => sum + Number(s.params[`line_items[${n}][quantity]`]) * Number(s.params[`line_items[${n}][price_data][unit_amount]`]), 0);
+        return send(200, { id: s.answerId || m[1], client_reference_id: s.answerRef || s.ref, status: s.status, payment_status: s.payment_status, payment_intent: pi,
+          amount_total: s.amountTotal ?? amount, currency: s.currency || s.params['line_items[0][price_data][currency]'] || 'eur' });
       }
       send(404, { error: { message: 'not found' } });
     });
