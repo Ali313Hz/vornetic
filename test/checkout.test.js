@@ -296,3 +296,14 @@ test('a repeat whose payment went through at Stripe meanwhile: recorded once, an
     assert.strictEqual(s.q('SELECT paid_via FROM orders')[0].paid_via, 'stripe');
   } finally { await s.close(); }
 });
+
+test('the same checkout in the other language (EN/ES) is the same order: no second order, stock once', async () => {
+  const s = await shop();
+  try {
+    const id = newId();
+    const en = await s.place('card', { qty: 2, checkout_id: id, extra: { lang: 'en' } });
+    const es = await s.place('card', { qty: 2, checkout_id: id, extra: { lang: 'es' } });
+    assert.deepStrictEqual([es.status, es.body.ref, es.body.redirect], [200, en.body.ref, en.body.redirect], JSON.stringify(es.body));
+    assert.deepStrictEqual([s.orders().length, s.stock()], [1, 8]);
+  } finally { await s.close(); }
+});

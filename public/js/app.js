@@ -852,9 +852,10 @@ async function viewCheckout() {
   const fromAccount = ME ? Object.fromEntries(Object.entries({
     email: ME.email, phone: ME.phone, customer_name: ME.name, address: ME.address, zip: ME.zip, city: ME.city,
     province: ME.province, country: ME.country }).filter(([, v]) => v)) : {};
-  // a checkout attempt still waiting (e.g. back from the Stripe page): its form comes back exactly as
-  // sent — ahead of the account's details — so paying again continues the same attempt and order
-  const pending = (store.get('vcheckout', null) || {}).fields || {};
+  // a checkout attempt of THIS customer still waiting (e.g. back from the Stripe page): its form comes
+  // back exactly as sent — ahead of the account's details — so paying again continues the same attempt
+  // and order. Another customer's pending attempt is discarded (checkout-attempt.js).
+  const pending = CheckoutAttempt.pendingFields(browserStorage(), CheckoutAttempt.ownerOf(ME));
   const saved = { ...store.get('vaddr', {}), ...fromAccount, ...pending };
   const methods = ['card', 'bizum', 'transfer', 'contact'].filter(m => CONFIG.payments[m]);
   const cancelled = new URLSearchParams(location.search).has('cancelled');
@@ -930,15 +931,16 @@ async function viewCheckout() {
     try {
       const body = { ...data, lang: LANG, items: cart.get().map(i => ({ id: i.id, qty: i.qty, options: i.options, car: i.car })) };
       let res;
-      try { res = await post('/api/orders', { ...body, checkout_id: checkoutAttempt(body) }); }
+      const attempt = () => CheckoutAttempt.attemptId(browserStorage(), body, CheckoutAttempt.ownerOf(ME), crypto);
+      try { res = await post('/api/orders', { ...body, checkout_id: attempt() }); }
       catch (err) {
         // that attempt can't be continued (its payment page expired, or the order changed): start a new one, once
         if (!['checkout_changed', 'checkout_ended'].includes(err.message)) throw err;
-        store.del('vcheckout');
-        res = await post('/api/orders', { ...body, checkout_id: checkoutAttempt(body) });
+        CheckoutAttempt.clear(browserStorage());
+        res = await post('/api/orders', { ...body, checkout_id: attempt() });
       }
       if (res.redirect) { location.href = res.redirect; return; }   // (the attempt is kept: "back" from Stripe continues it)
-      store.del('vcheckout');
+      CheckoutAttempt.clear(browserStorage());
       cart.clear();
       try { sessionStorage.setItem('vorder', JSON.stringify(res)); } catch {}
       PRODUCTS = null; ME = undefined;
@@ -950,34 +952,16 @@ async function viewCheckout() {
   });
 }
 
-// One random ID per checkout attempt, kept in this browser (all tabs) while the cart and the form stay
-// the same, also after coming back from the Stripe page. The server answers a repeat of the same
-// attempt with the order it already made, so a double click, a refresh, a second tab or "back" from
-// Stripe never makes a second order. Only a short hash of the cart and form is stored, not the data.
-// The attempt also keeps the form as sent (delivery details, notes, payment method): the checkout
-// page puts it back ahead of the account's details, so coming back from Stripe gives the same form —
-// the same attempt. Cleared once the order is placed or paid.
-function checkoutAttempt(body) {
-  const fp = hashText(JSON.stringify(body));
-  let a = store.get('vcheckout', null);
-  if (!a || a.fp !== fp || !a.id) {
-    const { items, lang, ...fields } = body;
-    a = { id: newCheckoutId(), fp, fields };
-    store.set('vcheckout', a);
-  }
-  return a.id;
-}
-const newCheckoutId = () => crypto.randomUUID ? crypto.randomUUID()
-  : [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
-// FNV-1a, 32 bit: enough to notice that the cart or the form changed
-const hashText = t => { let h = 0x811c9dc5; for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 0x01000193); return (h >>> 0).toString(16); };
+// One checkout attempt = one order: see public/js/checkout-attempt.js (cleared once the order is
+// placed or paid, and on logout). localStorage may be unavailable (private mode): then no attempt is kept.
+const browserStorage = () => { try { return localStorage; } catch { return null; } };
 
 async function viewStripeReturn() {
   const q = new URLSearchParams(location.search);
   app.innerHTML = `<div class="loading">…</div>`;
   try {
     const res = await post('/api/orders/confirm', { ref: q.get('ref'), session_id: q.get('session_id') });
-    store.del('vcheckout');
+    CheckoutAttempt.clear(browserStorage());
     cart.clear();
     PRODUCTS = null;
     try { sessionStorage.setItem('vorder', JSON.stringify(res)); } catch {}
@@ -1034,6 +1018,7 @@ async function viewAccount(tab) {
   $('#logout').addEventListener('click', async () => {
     await post('/api/account/logout');
     ME = null; myCar.clear(); store.del('vaddr');
+    CheckoutAttempt.clear(browserStorage());   // the next person on this browser must not get this checkout
     go('/');
   });
   const body = $('#accBody');
