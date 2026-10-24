@@ -73,6 +73,45 @@ test('clear() (used on logout and after a placed order) removes the pending deta
   }
 });
 
+// ---------- The remembered delivery address (pre-fills the next checkout) ----------
+const ADDR = { email: 'guest@example.test', phone: '600000001', customer_name: 'Guest', address: 'Calle Falsa 1', zip: '07001', city: 'Palma', province: '', country: 'ES' };
+
+test('the remembered address comes back for the same customer (guest -> same guest, account -> same account)', () => {
+  for (const who of [GUEST, A]) {
+    const st = fakeStorage();
+    CA.rememberAddress(st, who, ADDR);
+    assert.deepStrictEqual(CA.savedAddress(st, who), ADDR, who);
+  }
+});
+
+test('another customer on the same browser never gets the remembered address (guest checkout, then someone logs in)', () => {
+  for (const [first, next] of [[GUEST, A], [A, B], [A, GUEST]]) {
+    const st = fakeStorage();
+    CA.rememberAddress(st, first, ADDR);
+    assert.deepStrictEqual(CA.savedAddress(st, next), {}, `${first} -> ${next}: nothing pre-filled`);
+    assert.strictEqual(st.getItem(CA.ADDR_KEY), null, 'and it is gone');
+  }
+});
+
+test('an address saved by the old shop page (no owner) is not shown to anyone, and is removed', () => {
+  const st = fakeStorage();
+  st.setItem(CA.ADDR_KEY, JSON.stringify(ADDR));   // the old format: the bare address
+  assert.deepStrictEqual(CA.savedAddress(st, A), {});
+  assert.strictEqual(st.getItem(CA.ADDR_KEY), null);
+  // no storage / blocked storage: no crash, nothing remembered
+  const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
+  for (const s of [null, broken]) { CA.rememberAddress(s, A, ADDR); assert.deepStrictEqual(CA.savedAddress(s, A), {}); CA.forgetAddress(s); }
+});
+
+test('the checkout page reads and writes the remembered address only through these helpers', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
+  assert.match(app, /CheckoutAttempt\.savedAddress\(browserStorage\(\), CheckoutAttempt\.ownerOf\(ME\)\)/, 'pre-filled for the current customer only');
+  assert.match(app, /CheckoutAttempt\.rememberAddress\(browserStorage\(\), CheckoutAttempt\.ownerOf\(ME\), /, 'saved with its owner');
+  assert.doesNotMatch(app, /store\.(get|set|del)\('vaddr'/, 'no other code reads or writes it directly');
+  const logout = app.slice(app.indexOf("await post('/api/account/logout')"), app.indexOf("await post('/api/account/logout')") + 300);
+  assert.match(logout, /CheckoutAttempt\.forgetAddress\(/, 'logout forgets it');
+});
+
 test('the shop page uses it: loaded before app.js, cleared on logout, restored only for the owner', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   assert.ok(html.indexOf('/js/checkout-attempt.js') > 0 && html.indexOf('/js/checkout-attempt.js') < html.indexOf('/js/app.js'), 'loaded before app.js');

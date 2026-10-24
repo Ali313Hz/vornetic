@@ -439,7 +439,7 @@ function takeStock(items, notEnough) {
   const take = db.prepare('UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?');
   for (const [id, qty] of qtyByProduct(items)) {
     if (take.run(qty, id, qty).changes) continue;
-    const p = db.prepare('SELECT name_en, stock FROM products WHERE id = ?').get(id);
+    const p = db.prepare('SELECT name_en, name_es, stock FROM products WHERE id = ?').get(id);
     if (p) throw new Error(notEnough(p, qty));
   }
 }
@@ -747,7 +747,9 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
         // never a payable order for something no longer sold, nor one that differs from the page.
         if (session && JSON.stringify(b.items.map(cleanLine)) !== JSON.stringify(items))
           throw new Error('Your cart changed while the payment page was being prepared. Please check it and try again.');
-        takeStock(items, (p, qty) => `Not enough stock: ${p.name_en} (only ${p.stock} left, you asked for ${qty})`);
+        takeStock(items, (p, qty) => lang === 'es'
+          ? `No hay stock suficiente: ${p.name_es} (quedan ${p.stock}, has pedido ${qty})`
+          : `Not enough stock: ${p.name_en} (only ${p.stock} left, you asked for ${qty})`);
         return db.prepare(`INSERT INTO orders
           (ref, user_id, customer_name, email, phone, address, city, zip, province, country, notes, items,
            subtotal_cents, shipping_cents, total_cents, payment_method, lang, checkout_id, checkout_hash, stripe_session, stripe_url)
