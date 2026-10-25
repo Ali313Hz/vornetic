@@ -103,9 +103,10 @@ test('nginx config: the install command copies the file from where it really is'
 test('the admin page uploads one file per request; videos are checked first, photos after shrinking', () => {
   const admin = fs.readFileSync(path.join(ROOT, 'public', 'js', 'admin.js'), 'utf8');
   const grab = re => { const m = admin.match(re); assert.ok(m, 'not found in admin.js: ' + re); return m[0]; };
-  const { planUploads, photoTooBig } = new Function([grab(/^const uploadLimits = .*$/m),
+  const load = lang => new Function([`const LANG = ${JSON.stringify(lang)};`, grab(/^const L = .*$/m), grab(/^const uploadLimits = .*$/m),
     grab(/^function planUploads[\s\S]*?^\}\r?$/m), grab(/^function photoTooBig[\s\S]*?^\}\r?$/m)].join('\n')
     + '\nreturn { planUploads, photoTooBig };')();
+  const { planUploads, photoTooBig } = load('tr');
   const MB = 1024 * 1024;
   const limits = { photo_mb: 12, video_mb: 80, photo_ext: ['.jpg', '.jpeg', '.png', '.webp'], video_ext: ['.mp4', '.webm'] };
   const files = [
@@ -122,6 +123,9 @@ test('the admin page uploads one file per request; videos are checked first, pho
   assert.strictEqual(photoTooBig({ name: 'camera.JPG' }, { size: 0.6 * MB }, limits), null);
   assert.strictEqual(photoTooBig({ name: 'f.png' }, { size: 12 * MB }, limits), null, 'exactly 12 MB is fine');
   assert.match(photoTooBig({ name: 'f.png' }, { size: 12 * MB + 1 }, limits), /f\.png: küçültüldükten sonra bile 12 MB'tan büyük/);
+  // the same messages in the Spanish panel
+  assert.match(load('es').planUploads(files, limits).skipped.join('\n'), /d\.mp4: vídeo de 80 MB como máximo/);
+  assert.match(load('es').photoTooBig({ name: 'f.png' }, { size: 12 * MB + 1 }, limits), /f\.png: pesa más de 12 MB incluso reducida/);
   assert.strictEqual(photoTooBig({ name: 'a.mp4' }, { size: 80 * MB }, limits), null, 'videos were checked before');
   // uploadFiles: shrink first, check, then one file per request
   const up = grab(/^async function uploadFiles[\s\S]*?^\}\r?$/m);

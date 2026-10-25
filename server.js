@@ -13,6 +13,7 @@ const mail = require('./mail');
 const catalog = require('./catalog');
 const stripeConfig = require('./stripe');
 const finance = require('./finance');
+const { adminLang } = require('./admin-i18n');
 
 const app = express();
 const PORT = process.env.PORT || 3300;
@@ -160,6 +161,8 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json', limit: '
 });
 
 app.use(express.json({ limit: '200kb' }));
+// admin panel messages in the panel's language (Turkish / Spanish), see admin-i18n.js
+app.use('/api/admin', adminLang);
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public'), { index: false, maxAge: IS_PROD ? '1h' : 0 }));
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));

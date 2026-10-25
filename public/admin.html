@@ -12,7 +12,9 @@
   .tabs { display:flex; gap:2px; flex:1; overflow-x:auto; }
   .tabs button { background:none; border:0; padding:8px 12px; border-radius:8px; color:#b9b9be; font-weight:500; cursor:pointer; white-space:nowrap; }
   .tabs button.on { color:#fff; background:#1c1c1e; }
-  #logout { background:none; border:1px solid #3a3a3c; color:#fff; }
+  #logout, #lang { background:none; border:1px solid #3a3a3c; color:#fff; }
+  #lang { min-width:44px; font-weight:600; }
+  #logout[hidden] { display:none; }   /* .btn's display would otherwise show it on the login screen */
   .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:24px; }
   .stats div { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:16px; }
   .stats b { display:block; font-size:24px; font-weight:600; }
@@ -120,6 +122,7 @@
 <header class="topbar"><div class="wrap adm-top">
   <a href="/" class="logo" target="_blank"><img src="/img/emblem.png" alt="" class="logo-mark"></a>
   <nav class="tabs" id="tabs"></nav>
+  <button class="btn sm" id="lang" type="button" title="Español">ES</button>
   <button class="btn sm" id="logout" hidden>Çıkış</button>
 </div></header>
 <div class="wrap" id="bkwarn"></div>
