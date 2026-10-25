@@ -2,16 +2,16 @@
 // Phone photos carry EXIF/XMP: GPS position, time, camera serial numbers, sometimes the owner's
 // name. The browser only re-encodes large photos, so the server strips every photo itself.
 // No image library: the file is rebuilt from its own blocks, keeping only what draws the picture
-// (and its colour profile). JPEG keeps the orientation as a minimal EXIF, so phone photos are not
-// shown sideways. A file whose structure can't be read is refused (null), never saved as it came.
+// (and its colour profile). JPEG and WEBP keep the orientation as a minimal EXIF (one tag, nothing
+// else), so a photo is shown the way it was taken. A file whose structure can't be read is refused (null), never saved as it came.
 
 // ---------- JPEG ----------
 // Kept: APP0 (JFIF), APP2 ICC_PROFILE (colours), APP14 (Adobe colour transform), every image segment.
 // Dropped: APP1 (EXIF, XMP), the other APPn, COM, and anything after the end of the image.
-function jpegOrientation(app1) {
-  // app1 = segment data after the length: "Exif\0\0" + TIFF
-  if (app1.length < 14 || app1.toString('latin1', 0, 6) !== 'Exif\0\0') return 1;
-  const t = app1.subarray(6);
+// The Orientation tag (1–8) of EXIF data: TIFF, with or without the "Exif\0\0" prefix; 1 if none
+function exifOrientation(exif) {
+  const t = exif.toString('latin1', 0, 6) === 'Exif\0\0' ? exif.subarray(6) : exif;
+  if (t.length < 8) return 1;
   const le = t.toString('latin1', 0, 2) === 'II';
   if (!le && t.toString('latin1', 0, 2) !== 'MM') return 1;
   const u16 = o => (le ? t.readUInt16LE(o) : t.readUInt16BE(o));
@@ -26,10 +26,10 @@ function jpegOrientation(app1) {
   }
   return 1;
 }
-// "Exif\0\0" + big-endian TIFF with one tag: Orientation
+// Big-endian TIFF with one tag: Orientation
+const orientationTiff = v => Buffer.from([0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, v, 0, 0, 0, 0, 0, 0]);
 function orientationApp1(v) {
-  const d = Buffer.from([0x45, 0x78, 0x69, 0x66, 0, 0, 0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8,
-    0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, v, 0, 0, 0, 0, 0, 0]);
+  const d = Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), orientationTiff(v)]);
   return Buffer.concat([Buffer.from([0xff, 0xe1, (d.length + 2) >> 8, (d.length + 2) & 0xff]), d]);
 }
 function stripJpeg(buf) {
@@ -58,7 +58,7 @@ function stripJpeg(buf) {
     const seg = buf.subarray(m - 1, pos + len);
     pos += len;
     const isApp = marker >= 0xe0 && marker <= 0xef;
-    if (marker === 0xe1) { if (orientation === 1) orientation = jpegOrientation(data); continue; }
+    if (marker === 0xe1) { if (orientation === 1 && data.toString('latin1', 0, 6) === 'Exif\0\0') orientation = exifOrientation(data); continue; }
     if (marker === 0xfe) continue;                 // COM
     if (isApp && !(marker === 0xe0 || marker === 0xee || (marker === 0xe2 && data.toString('latin1', 0, 12) === 'ICC_PROFILE\0'))) continue;
     out.push(seg);
@@ -98,6 +98,8 @@ function stripPng(buf) {
 
 // ---------- WEBP ----------
 // Kept: the image chunks (VP8, VP8L, VP8X, ALPH, ANIM, ANMF) and ICCP. Dropped: EXIF, XMP, others.
+// An EXIF orientation comes back as a minimal EXIF chunk, only in an extended file (VP8X: the one
+// kind that may carry EXIF). Chrome ignores it, other browsers may not: the photo shows as uploaded.
 const WEBP_KEEP = new Set(['VP8 ', 'VP8L', 'VP8X', 'ALPH', 'ANIM', 'ANMF', 'ICCP']);
 function stripWebp(buf) {
   if (buf.length < 20 || buf.toString('latin1', 0, 4) !== 'RIFF' || buf.toString('latin1', 8, 12) !== 'WEBP') return null;
@@ -105,6 +107,8 @@ function stripWebp(buf) {
   const out = [];
   let pos = 12;
   let image = false;
+  let vp8x = null;
+  let orientation = 1;
   while (pos + 8 <= end) {
     const type = buf.toString('latin1', pos, pos + 4);
     const len = buf.readUInt32LE(pos + 4);
@@ -112,14 +116,20 @@ function stripWebp(buf) {
     if (pos + 8 + len > end) return null;
     if (WEBP_KEEP.has(type)) {
       let chunk = buf.subarray(pos, Math.min(next, end));
-      if (type === 'VP8X') { chunk = Buffer.from(chunk); chunk[8] &= ~0x0c; }   // flags: no EXIF (0x08), no XMP (0x04)
+      if (type === 'VP8X') { chunk = Buffer.from(chunk); chunk[8] &= ~0x0c; vp8x = chunk; }   // flags: no EXIF (0x08), no XMP (0x04)
       if (chunk.length & 1) chunk = Buffer.concat([chunk, Buffer.alloc(1)]);
       out.push(chunk);
       if (type === 'VP8 ' || type === 'VP8L' || type === 'ANMF') image = true;
-    }
+    } else if (type === 'EXIF' && orientation === 1) orientation = exifOrientation(buf.subarray(pos + 8, pos + 8 + len));
     pos = next;
   }
   if (!image) return null;
+  if (vp8x && orientation !== 1) {
+    vp8x[8] |= 0x08;
+    const exif = orientationTiff(orientation);
+    const head = Buffer.alloc(8); head.write('EXIF', 0, 'latin1'); head.writeUInt32LE(exif.length, 4);
+    out.push(head, exif);                         // 26 bytes: no padding needed
+  }
   const body = Buffer.concat(out);
   const head = Buffer.alloc(12);
   head.write('RIFF', 0, 'latin1'); head.writeUInt32LE(body.length + 4, 4); head.write('WEBP', 8, 'latin1');

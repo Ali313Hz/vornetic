@@ -119,3 +119,26 @@ test('files that cannot be read as their type are refused, not saved as they cam
   assert.strictEqual(stripImageMeta(webp([riffChunk('EXIF', Buffer.from(SECRET))]), '.webp'), null, 'no image in it');
   assert.strictEqual(stripImageMeta(png(), '.gif'), null);
 });
+
+test('WEBP: a rotated photo keeps only its orientation (minimal EXIF chunk), never GPS or camera data', () => {
+  // EXIF in a WEBP chunk: TIFF as written by most tools, or with the "Exif\0\0" prefix some add
+  const tiff = exifApp1(6).subarray(10);                          // the TIFF part of the JPEG builder: Orientation 6 + secret
+  for (const exif of [tiff, Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), tiff])]) {
+    const vp8x = Buffer.alloc(10); vp8x[0] = 0x08 | 0x10;          // EXIF + alpha
+    const out = stripImageMeta(webp([riffChunk('VP8X', vp8x), riffChunk('VP8L', Buffer.from([0x2f, 0, 0, 0, 0])), riffChunk('EXIF', exif)]), '.webp');
+    assert.ok(!has(out, SECRET), 'no camera text');
+    const i = out.indexOf(Buffer.from('EXIF', 'latin1'));
+    assert.ok(i > 0, 'an EXIF chunk with the orientation');
+    const t = out.subarray(i + 8, i + 8 + out.readUInt32LE(i + 4));
+    assert.deepStrictEqual([t.length, t.toString('latin1', 0, 2), t.readUInt16BE(8), t.readUInt16BE(10), t.readUInt16BE(18)], [26, 'MM', 1, 0x0112, 6]);
+    assert.strictEqual(out[20], 0x08 | 0x10, 'EXIF flag on (only the orientation is in it), alpha kept');
+    assert.strictEqual(out.readUInt32LE(4), out.length - 8);
+    assert.ok(stripImageMeta(out, '.webp').equals(out), 'stripping again gives the same file');
+  }
+  // orientation 1, or a simple WEBP without the extended header: no EXIF at all
+  const vp8x = Buffer.alloc(10); vp8x[0] = 0x08;
+  const upright = stripImageMeta(webp([riffChunk('VP8X', vp8x), riffChunk('VP8L', Buffer.from([0x2f, 0, 0, 0, 0])), riffChunk('EXIF', exifApp1(1).subarray(10))]), '.webp');
+  assert.ok(!has(upright, 'EXIF') && upright[20] === 0);
+  const simple = stripImageMeta(webp([riffChunk('VP8L', Buffer.from([0x2f, 0, 0, 0, 0])), riffChunk('EXIF', tiff)]), '.webp');
+  assert.ok(!has(simple, 'EXIF') && !has(simple, SECRET));
+});

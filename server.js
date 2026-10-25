@@ -411,8 +411,10 @@ function saveReview(req, res) {
       db.prepare("UPDATE reviews SET rating = ?, text = ?, photo = ?, lang = ?, order_id = ?, updated_at = datetime('now') WHERE id = ?")
         .run(rating, text, photo, lang, orderId, old.id);
     } else {
-      db.prepare('INSERT INTO reviews (product_id, user_id, order_id, rating, text, photo, lang) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(p.id, req.user.id, orderId, rating, text, photo, lang);
+      // a review the shop hid and the customer deleted stays hidden when sent again (until the shop shows it)
+      const decided = db.prepare('SELECT status FROM review_moderation WHERE product_id = ? AND user_id = ?').get(p.id, req.user.id);
+      db.prepare('INSERT INTO reviews (product_id, user_id, order_id, rating, text, photo, lang, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(p.id, req.user.id, orderId, rating, text, photo, lang, decided?.status === 'hidden' ? 'hidden' : 'visible');
     }
   } catch (e) {
     if (req.file) removeUpload(photo);      // not saved: don't keep the new photo
@@ -422,9 +424,11 @@ function saveReview(req, res) {
   res.json({ ok: true });
 }
 
+// Account or product deleted: its reviews, their photos and the shop's decisions on them go too
 function deleteReviews(col, id) {
   const rows = db.prepare(`SELECT photo FROM reviews WHERE ${col} = ?`).all(id);
   db.prepare(`DELETE FROM reviews WHERE ${col} = ?`).run(id);
+  db.prepare(`DELETE FROM review_moderation WHERE ${col} = ?`).run(id);
   rows.forEach(r => removeUpload(r.photo));
 }
 
@@ -433,6 +437,7 @@ app.delete('/api/products/:slug/review', requireUser, (req, res) => {
   if (!p) return res.status(404).json({ error: 'Not found' });
   const r = db.prepare('SELECT * FROM reviews WHERE product_id = ? AND user_id = ?').get(p.id, req.user.id);
   if (r) {
+    // text, rating and photo are deleted; the shop's decision (review_moderation) stays
     db.prepare('DELETE FROM reviews WHERE id = ?').run(r.id);
     removeUpload(r.photo);
   }
@@ -1616,6 +1621,10 @@ app.put('/api/admin/reviews/:id', requireAdmin, (req, res) => {
     if (reply !== r.reply) replyAt = reply ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null;
   }
   db.prepare('UPDATE reviews SET status = ?, reply = ?, reply_at = ? WHERE id = ?').run(status, reply, replyAt, r.id);
+  if (status !== r.status) {
+    db.prepare(`INSERT INTO review_moderation (product_id, user_id, status) VALUES (?, ?, ?)
+      ON CONFLICT(product_id, user_id) DO UPDATE SET status = excluded.status, decided_at = datetime('now')`).run(r.product_id, r.user_id, status);
+  }
   res.json({ ok: true });
 });
 

@@ -208,3 +208,86 @@ test('product page and admin panel have the review texts in both languages', () 
   const admin = fs.readFileSync(path.join(__dirname, '..', 'public/js/admin.js'), 'utf8');
   assert.ok(admin.includes("reviews: 'Yorumlar'") && admin.includes("reviews: 'Opiniones'"));
 });
+
+// ---------- Codex P2 on PR #25: deleting a hidden review must not undo the shop's decision ----------
+test('a hidden review deleted by the customer comes back hidden; the content is gone, the decision stays', async () => {
+  const srv = await setup();
+  try {
+    const p = await srv.product();
+    const other = await srv.product('Otro artículo');
+    const f = await srv.customer('Félix Ruiz', 'felix@example.test');
+    const g = await srv.customer('Gema Sanz', 'gema@example.test');
+    for (const [c, items] of [[f, [{ id: p.id, qty: 1 }, { id: other.id, qty: 1 }]], [g, [{ id: p.id, qty: 1 }]]]) {
+      const o = await c.order(items);
+      assert.strictEqual((await srv.setOrder(o.body.ref, { status: 'shipped' })).status, 200);
+    }
+    await g.review(p.slug, { rating: 4, text: 'Correcto' });
+    await f.review(p.slug, { rating: 1, text: 'Texto ofensivo' }, { data: PNG, name: 'a.png' });
+    await f.review(other.slug, { rating: 5, text: 'Bien' });
+    const id = (await srv.admin('GET', '/api/admin/reviews')).body.find(r => r.user_email === 'felix@example.test' && r.product_id === p.id).id;
+    const photo = (await srv.reviews(p.slug, f.cookie)).body.me.mine.photo;
+    assert.strictEqual((await srv.admin('PUT', '/api/admin/reviews/' + id, { status: 'hidden' })).status, 200);
+    assert.deepStrictEqual([(await srv.reviews(p.slug)).body.count, (await srv.reviews(p.slug)).body.avg], [1, 4]);
+
+    // the customer deletes it: text and photo are gone for good
+    assert.strictEqual((await f.as('DELETE', `/api/products/${p.slug}/review`)).status, 200);
+    assert.strictEqual(fs.existsSync(path.join(srv.dataDir, 'uploads', path.basename(photo))), false, 'photo file deleted');
+    assert.ok(!(await srv.admin('GET', '/api/admin/reviews')).body.some(r => r.text === 'Texto ofensivo'), 'text deleted');
+    assert.strictEqual((await srv.reviews(p.slug, f.cookie)).body.me.mine, undefined);
+
+    // ...and sends it again: it stays out of the page and the average until the shop shows it
+    assert.deepStrictEqual(await f.review(p.slug, { rating: 1, text: 'Texto ofensivo' }), { status: 200, body: { ok: true } });
+    let pub = (await srv.reviews(p.slug, f.cookie)).body;
+    assert.deepStrictEqual([pub.count, pub.avg, pub.reviews.map(r => r.text)], [1, 4, ['Correcto']]);
+    assert.strictEqual(pub.me.mine.status, 'hidden', 'the customer is told it is hidden');
+    assert.ok(!(await srv.call('GET', '/p/' + p.slug)).text.includes('"ratingValue":2.5'), 'JSON-LD average unchanged');
+    const again = (await srv.admin('GET', '/api/admin/reviews?status=hidden')).body;
+    assert.deepStrictEqual(again.map(r => [r.user_email, r.text]), [['felix@example.test', 'Texto ofensivo']], 'waiting for the shop');
+
+    // the decision is only for that customer and product
+    assert.deepStrictEqual((await srv.reviews(other.slug)).body.reviews.map(r => r.text), ['Bien']);
+    await g.as('DELETE', `/api/products/${p.slug}/review`);
+    await g.review(p.slug, { rating: 5, text: 'Muy bien' });
+    pub = (await srv.reviews(p.slug)).body;
+    assert.deepStrictEqual([pub.count, pub.avg], [1, 5], 'a never-hidden review comes back visible');
+
+    // the shop shows it again: from then on it is a normal review (delete + resend stays visible)
+    const id2 = again[0].id;
+    assert.strictEqual((await srv.admin('PUT', '/api/admin/reviews/' + id2, { status: 'visible' })).status, 200);
+    assert.deepStrictEqual([(await srv.reviews(p.slug)).body.count, (await srv.reviews(p.slug)).body.avg], [2, 3]);
+    await f.as('DELETE', `/api/products/${p.slug}/review`);
+    await f.review(p.slug, { rating: 2, text: 'Mejor redactado' });
+    assert.deepStrictEqual([(await srv.reviews(p.slug)).body.count, (await srv.reviews(p.slug)).body.avg], [2, 3.5]);
+    // a reply or a status-less update does not change the decision
+    const id3 = (await srv.admin('GET', '/api/admin/reviews')).body.find(r => r.user_email === 'felix@example.test' && r.product_id === p.id).id;
+    await srv.admin('PUT', '/api/admin/reviews/' + id3, { status: 'hidden' });
+    await srv.admin('PUT', '/api/admin/reviews/' + id3, { reply: 'Gracias' });
+    await f.as('DELETE', `/api/products/${p.slug}/review`);
+    await f.review(p.slug, { rating: 2 });
+    assert.strictEqual((await srv.reviews(p.slug, f.cookie)).body.me.mine.status, 'hidden');
+  } finally { await srv.stop(); }
+});
+
+test('the kept decision holds no review content and goes when the account or product is deleted', async () => {
+  const srv = await setup();
+  try {
+    const p = await srv.product();
+    const h = await srv.customer('Hugo Vidal', 'hugo@example.test');
+    const o = await h.order([{ id: p.id, qty: 1 }]);
+    await srv.setOrder(o.body.ref, { status: 'shipped' });
+    await h.review(p.slug, { rating: 1, text: 'Contenido a ocultar' });
+    const id = (await srv.admin('GET', '/api/admin/reviews')).body[0].id;
+    await srv.admin('PUT', '/api/admin/reviews/' + id, { status: 'hidden' });
+    await h.as('DELETE', `/api/products/${p.slug}/review`);
+    const { DatabaseSync } = require('node:sqlite');
+    const read = sql => { const d = new DatabaseSync(path.join(srv.dataDir, 'store.db')); try { return d.prepare(sql).all(); } finally { d.close(); } };
+    const rows = read('SELECT * FROM review_moderation');
+    assert.strictEqual(rows.length, 1);
+    assert.deepStrictEqual(Object.keys(rows[0]).sort(), ['decided_at', 'product_id', 'status', 'user_id']);
+    assert.strictEqual(rows[0].status, 'hidden');
+    assert.strictEqual(read('SELECT COUNT(*) AS n FROM reviews')[0].n, 0, 'no text, rating or photo kept');
+    const user = (await srv.admin('GET', '/api/admin/customers')).body.find(u => u.email === 'hugo@example.test');
+    assert.strictEqual((await srv.admin('DELETE', '/api/admin/customers/' + user.id)).status, 200);
+    assert.strictEqual(read('SELECT COUNT(*) AS n FROM review_moderation')[0].n, 0, 'account deleted: decision deleted too');
+  } finally { await srv.stop(); }
+});
