@@ -543,6 +543,8 @@ const ORDER_MSG = {
     'Tu carrito ha cambiado mientras se preparaba la página de pago. Revísalo e inténtalo de nuevo.'],
   gone: ['A product in your cart is no longer available', 'Un producto de tu carrito ya no está disponible'],
   out: ['Out of stock: {name}', 'Agotado: {name}'],
+  choose: ['Please choose all the options for {name}', 'Elige todas las opciones de {name}'],
+  unavailable: ['{name} is not available with the options you chose', '{name} no está disponible con las opciones elegidas'],
   car: ['Please choose your car for {name}', 'Elige tu coche para {name}'],
   stock: ['Not enough stock: {name} (only {stock} left, you asked for {qty})', 'No hay stock suficiente: {name} (quedan {stock}, has pedido {qty})'],
 };
@@ -556,7 +558,15 @@ function cleanLine(it, lang) {
   if (!p) throw new Error(orderMsg(lang, 'gone'));
   if (p.stock <= 0) throw new Error(orderMsg(lang, 'out', p));
   const qty = Math.min(10, Math.max(1, parseInt(it.qty, 10) || 1));
-  const { unit, labels, labelsEs } = catalog.priceForSelection(p, it.options || {});
+  let sel;
+  try { sel = catalog.priceForSelection(p, it.options || {}); }
+  catch (e) {
+    if (!e.code) throw e;
+    // an out-of-stock choice says which one: "Agotado: Bombillas LED (Rojo)"
+    const choice = e.code === 'out' ? { name_en: `${p.name_en} (${e.value.en})`, name_es: `${p.name_es} (${e.value.es || e.value.en})` } : p;
+    throw new Error(orderMsg(lang, e.code, choice));
+  }
+  const { unit, labels, labelsEs } = sel;
   let car = null;
   if (p.fitment === 'car') {
     const c = cleanCar(it.car);

@@ -662,12 +662,13 @@ function editProduct(src) {
 
   const valueRow = (o, oi, v, vi) => {
     const ctx = `v:${oi}:${vi}`;
-    return `<div class="vrow${v.soon ? ' soon' : ''}">
+    return `<div class="vrow${v.soon || v.out ? ' soon' : ''}">
       <input class="in" data-k="ves" data-oi="${oi}" data-vi="${vi}" value="${esc(v.es)}" placeholder="${L('İspanyolca', 'Español')}" aria-label="${L('Değer İspanyolca', 'Valor en español')}">
       <input class="in" data-k="ven" data-oi="${oi}" data-vi="${vi}" value="${esc(v.en === v.es ? '' : v.en)}" placeholder="${L('İngilizce (aynıysa boş)', 'Inglés (vacío si es igual)')}" aria-label="${L('Değer İngilizce', 'Valor en inglés')}">
       <label class="delta"><span>+€</span><input class="in" data-k="vdelta" data-oi="${oi}" data-vi="${vi}" inputmode="decimal" value="${v.delta ? euro(v.delta) : ''}" placeholder="0"></label>
       <button type="button" class="btn ghost sm${openMedia === ctx ? ' on' : ''}" data-act="vmedia" data-ctx="${ctx}">📷 ${v.media.length || ''}</button>
       <button type="button" class="btn ghost sm${v.soon ? ' on' : ''}" data-act="vsoon" data-oi="${oi}" data-vi="${vi}" title="${L('Henüz elimde yok', 'Todavía no lo tengo')}">${L('Yakında', 'Próximamente')}</button>
+      <button type="button" class="btn ghost sm${v.out ? ' on' : ''}" data-act="vout" data-oi="${oi}" data-vi="${vi}" title="${L('Şu an stokta yok — mağazada “Agotado” yazar, satın alınamaz', 'Ahora sin stock — en la tienda pone “Agotado” y no se puede comprar')}">${L('Tükendi', 'Agotado')}</button>
       <button type="button" class="btn ghost sm" data-act="vdel" data-oi="${oi}" data-vi="${vi}" aria-label="${L('Sil', 'Borrar')}">✕</button>
       ${openMedia === ctx ? `<div class="vmedia"><p class="small" style="margin:0 0 8px">${L(`<b>${esc(v.es || 'Bu değer')}</b> seçilince gösterilecek fotoğraf ve videolar:`, `Fotos y vídeos que se muestran al elegir <b>${esc(v.es || 'este valor')}</b>:`)}</p>${tiles(ctx, true)}</div>` : ''}
     </div>`;
@@ -796,7 +797,7 @@ function editProduct(src) {
   const addValues = oi => {
     const inp = $(`[data-k=vnew][data-oi="${oi}"]`);
     const parts = inp.value.split(',').map(x => x.trim()).filter(Boolean);
-    for (const x of parts) P.options[oi].values.push({ id: newId(), es: x, en: x, delta: 0, soon: false, media: [] });
+    for (const x of parts) P.options[oi].values.push({ id: newId(), es: x, en: x, delta: 0, soon: false, out: false, media: [] });
     if (parts.length) { dirty = true; draw(); $(`[data-k=vnew][data-oi="${oi}"]`)?.focus(); }
   };
   const onClick = async e => {
@@ -814,7 +815,9 @@ function editProduct(src) {
     if (a === 'odel' && confirm(L('Bu seçenek ve tüm değerleri silinsin mi?', '¿Borrar esta opción y todos sus valores?'))) { P.options.splice(oi, 1); P.combos = {}; }
     if (a === 'vadd') return addValues(oi);
     if (a === 'vdel') { P.options[oi].values.splice(vi, 1); openMedia = null; }
-    if (a === 'vsoon') P.options[oi].values[vi].soon = !P.options[oi].values[vi].soon;
+    // "coming soon" and "out of stock" exclude each other
+    if (a === 'vsoon') { const v = P.options[oi].values[vi]; v.soon = !v.soon; if (v.soon) v.out = false; }
+    if (a === 'vout') { const v = P.options[oi].values[vi]; v.out = !v.out; if (v.out) v.soon = false; }
     if (a === 'vmedia') openMedia = openMedia === b.dataset.ctx ? null : b.dataset.ctx;
     if (a === 'ctoggle') { const c = P.combos[b.dataset.key] = P.combos[b.dataset.key] || {}; c.off = !c.off; }
     if (a === 'mdel' || a === 'mleft' || a === 'mright') {
