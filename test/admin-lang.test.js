@@ -61,3 +61,50 @@ test('admin panel: language switch and both languages for the tabs', () => {
   assert.match(js, /'X-Admin-Lang': LANG/);
   for (const w of ['Pedidos', 'Clientes', 'Productos', 'Finanzas', 'Ajustes', 'Siparişler', 'Ayarlar']) assert.ok(js.includes(`'${w}'`), w);
 });
+
+// ---------- language switch must not silently drop unsaved edits (Codex P2 on PR #24) ----------
+function adminSource() { return fs.readFileSync(path.join(ROOT, 'public/js/admin.js'), 'utf8').replace(/\r\n/g, '\n'); }
+function loadIsUnsaved() {
+  const m = adminSource().match(/\nfunction isUnsaved\(el\) \{[\s\S]*?\n\}\n/);
+  assert.ok(m, 'isUnsaved() found in admin.js');
+  return new Function(`${m[0]}; return isUnsaved;`)();
+}
+// Just enough of a DOM element for isUnsaved(): what the page drew (default*) and what it holds now
+const field = (o = {}) => ({ tagName: 'INPUT', type: 'text', disabled: false, closest: () => null, ...o });
+const select = (defaults, selectedIndex) => ({
+  tagName: 'SELECT', type: 'select-one', disabled: false, closest: () => null, selectedIndex,
+  options: defaults.map(d => ({ defaultSelected: d })),
+});
+
+test('isUnsaved: typed, ticked or picked values count; untouched fields, filters and files do not', () => {
+  const isUnsaved = loadIsUnsaved();
+  // settings / category / customer password fields, the bulb list textarea
+  assert.strictEqual(isUnsaved(field({ value: 'info@vornetic.com', defaultValue: 'info@vornetic.com' })), false);
+  assert.strictEqual(isUnsaved(field({ value: 'info@vornetic.com x', defaultValue: 'info@vornetic.com' })), true);
+  assert.strictEqual(isUnsaved(field({ tagName: 'TEXTAREA', type: 'textarea', value: 'BMW|3|E90\nH7', defaultValue: 'BMW|3|E90' })), true);
+  assert.strictEqual(isUnsaved(field({ value: '', defaultValue: 'old' })), true, 'a cleared field is an edit too');
+  // checkboxes (e.g. category "active", PayPal / Revolut switches)
+  assert.strictEqual(isUnsaved(field({ type: 'checkbox', checked: true, defaultChecked: true })), false);
+  assert.strictEqual(isUnsaved(field({ type: 'checkbox', checked: false, defaultChecked: true })), true);
+  // selects (an order's status): drawn with "selected", or without (then the first option is shown)
+  assert.strictEqual(isUnsaved(select([false, true, false], 1)), false);
+  assert.strictEqual(isUnsaved(select([false, true, false], 2)), true);
+  assert.strictEqual(isUnsaved(select([false, false], 0)), false);
+  assert.strictEqual(isUnsaved(select([false, false], 1)), true);
+  // not edits: search / filter boxes, file pickers (upload at once), disabled and hidden fields
+  assert.strictEqual(isUnsaved(field({ value: 'maría', defaultValue: '', closest: s => s === '[data-nodirty]' })), false);
+  assert.strictEqual(isUnsaved(field({ type: 'file', value: 'C:\fakepath\a.csv', defaultValue: '' })), false);
+  assert.strictEqual(isUnsaved(field({ disabled: true, value: 'x', defaultValue: '' })), false);
+  assert.strictEqual(isUnsaved(field({ type: 'hidden', value: 'x', defaultValue: '' })), false);
+});
+
+test('language switch asks before dropping edits on every screen; product and finance editors stay protected', () => {
+  const js = adminSource();
+  const handler = js.slice(js.indexOf("$('#lang').addEventListener('click'"));
+  assert.match(handler.slice(0, 600), /hasUnsavedEdits\(\) && !confirm\(/, 'the switch checks every screen for unsaved edits');
+  const guard = js.match(/const hasUnsavedEdits = \(\) =>[\s\S]*?;\n/)[0];
+  assert.match(guard, /\$\('\.peditor'\) \|\| \$\('#ff'\)/, 'product editor and finance form still always ask');
+  assert.match(guard, /\$\$\('input, textarea, select', root\)\.some\(isUnsaved\)/);
+  // search and filter boxes are not edits (their state is kept in variables and redrawn)
+  for (const id of ['os', 'of', 'cs', 'fm', 'fq']) assert.match(js, new RegExp(`id="${id}" data-nodirty`), id);
+});

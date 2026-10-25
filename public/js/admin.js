@@ -119,8 +119,8 @@ async function viewOrders() {
   root.innerHTML = `
     <div class="section-head"><h2>${L('Siparişler', 'Pedidos')}</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <input class="in search" id="os" placeholder="${L('Ara: isim, e-posta, sipariş no', 'Buscar: nombre, email, nº de pedido')}" value="${esc(orderSearch)}">
-        <select class="in" id="of" style="width:auto">
+        <input class="in search" id="os" data-nodirty placeholder="${L('Ara: isim, e-posta, sipariş no', 'Buscar: nombre, email, nº de pedido')}" value="${esc(orderSearch)}">
+        <select class="in" id="of" data-nodirty style="width:auto">
           <option value="">${L('Hepsi', 'Todos')}</option>${Object.entries(STATUS()).map(([k, v]) => `<option value="${k}"${k === orderFilter ? ' selected' : ''}>${v}</option>`).join('')}
           <option value="overdue"${orderFilter === 'overdue' ? ' selected' : ''}>⏰ ${L('5 günü geçenler', 'Más de 5 días')}${ME && ME.overdue_orders ? ` (${ME.overdue_orders})` : ''}</option>
         </select></div></div>
@@ -271,7 +271,7 @@ async function viewCustomers() {
   const list = await api('/api/admin/customers');
   root.innerHTML = `
     <div class="section-head"><h2>${L('Müşteriler', 'Clientes')} <span class="muted" style="font-weight:400">(${list.length})</span></h2>
-      <input class="in search" id="cs" placeholder="${L('Ara: isim, e-posta, telefon, şehir', 'Buscar: nombre, email, teléfono, ciudad')}" value="${esc(custSearch)}"></div>
+      <input class="in search" id="cs" data-nodirty placeholder="${L('Ara: isim, e-posta, telefon, şehir', 'Buscar: nombre, email, teléfono, ciudad')}" value="${esc(custSearch)}"></div>
     <div class="table-wrap"><table>
       <thead><tr><th>${L('Müşteri', 'Cliente')}</th><th>${L('İletişim', 'Contacto')}</th><th>${L('Adres', 'Dirección')}</th><th>${L('Araba', 'Coche')}</th><th>${L('Sipariş', 'Pedidos')}</th><th>${L('Harcama', 'Gastado')}</th><th>${L('Kayıt', 'Alta')}</th></tr></thead>
       <tbody id="ctb"></tbody></table></div>`;
@@ -867,7 +867,7 @@ async function viewFinance() {
   root.innerHTML = `
     <div class="section-head fin-head"><h2>${L('Finans', 'Finanzas')}</h2>
       <div class="fin-tools">
-        <input class="in" type="month" id="fm" value="${d.month}" aria-label="${L('Ay', 'Mes')}">
+        <input class="in" type="month" id="fm" data-nodirty value="${d.month}" aria-label="${L('Ay', 'Mes')}">
         <a class="btn ghost sm" href="/api/admin/finance/export.xlsx?month=${d.month}" download>${L('Excel indir (bu ay)', 'Descargar Excel (este mes)')}</a>
         <a class="btn ghost sm" href="/api/admin/finance/export.xlsx" download>${L('Excel indir (tümü)', 'Descargar Excel (todo)')}</a>
         <a class="btn ghost sm" href="/api/admin/finance/export.csv?month=${d.month}" download>${L('CSV indir', 'Descargar CSV')}</a>
@@ -897,7 +897,7 @@ async function viewFinance() {
           <tr><th>${L('Toplam', 'Total')}</th><th ${right}>${eur(d.expense_cents)}</th></tr></table>` : `<p class="muted small">${L('Bu ay gider yok.', 'Sin gastos este mes.')}</p>`}</div>
     </div>
     <div class="section-head" style="margin:8px 0 10px"><h3 style="margin:0">${L('Kayıtlar', 'Movimientos')} · ${esc(monthName(d.month))} (${d.entries.length})</h3>
-      <input class="in search" id="fq" placeholder="${L('Ara: not, kişi, referans', 'Buscar: nota, persona, referencia')}" value="${esc(finSearch)}" style="max-width:260px"></div>
+      <input class="in search" id="fq" data-nodirty placeholder="${L('Ara: not, kişi, referans', 'Buscar: nota, persona, referencia')}" value="${esc(finSearch)}" style="max-width:260px"></div>
     <div class="table-wrap" id="flist"></div>
     <div class="box" style="margin-top:16px"><h3>${L('Son 12 ay', 'Últimos 12 meses')}</h3><div style="overflow-x:auto"><table>
       <tr><th>${L('Ay', 'Mes')}</th><th ${right}>${L('Gelir', 'Ingresos')}</th><th ${right}>${L('Gider', 'Gastos')}</th><th ${right}>${L('Kalan', 'Saldo')}</th></tr>
@@ -1109,9 +1109,27 @@ function drawLang() {
   b.setAttribute('aria-label', b.title);
   $('#logout').textContent = L('Çıkış', 'Salir');
 }
+// Has this field been changed since the screen drew it? (typed or picked, not saved yet)
+// The browser keeps what the page drew as defaultValue / defaultChecked / defaultSelected.
+// Search and filter boxes (data-nodirty) are not edits: their state is kept and redrawn anyway.
+function isUnsaved(el) {
+  if (el.disabled || el.type === 'file' || el.type === 'hidden' || el.closest('[data-nodirty]')) return false;
+  if (el.type === 'checkbox' || el.type === 'radio') return el.checked !== el.defaultChecked;
+  if (el.tagName === 'SELECT') {
+    const opts = [...el.options];
+    const first = opts.findIndex(o => o.defaultSelected);
+    return el.selectedIndex !== (first === -1 ? (opts.length ? 0 : -1) : first);
+  }
+  return el.value !== el.defaultValue;
+}
+const hasUnsavedEdits = () =>
+  // the product editor and the finance form keep their state in code, so they always count as open edits
+  !!($('.peditor') || $('#ff')) || $$('input, textarea, select', root).some(isUnsaved);
+
 $('#lang').addEventListener('click', () => {
-  // an open product editor or finance form would lose what was typed
-  if (($('.peditor') || $('#ff')) && !confirm(L('Kaydedilmemiş değişiklikler kaybolabilir. Dil değiştirilsin mi?', 'Se pueden perder los cambios sin guardar. ¿Cambiar de idioma?'))) return;
+  // any screen with something typed and not saved would lose it: settings, categories, bulbs,
+  // an order's status/tracking, a customer's new password, the product editor, the finance form
+  if (!$('#logout').hidden && hasUnsavedEdits() && !confirm(L('Kaydedilmemiş değişiklikler kaybolabilir. Dil değiştirilsin mi?', 'Se pueden perder los cambios sin guardar. ¿Cambiar de idioma?'))) return;
   LANG = LANG === 'es' ? 'tr' : 'es';
   try { localStorage.setItem(LANG_KEY, LANG); } catch { /* private mode: this visit only */ }
   drawLang();
