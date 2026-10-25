@@ -312,7 +312,7 @@ test('if Stripe fails, no order is made, stock is untouched, and Stripe details 
     const p = await srv.newProduct(4);
     const r = await srv.order([{ id: p, qty: 1 }], { payment_method: 'card' });
     assert.strictEqual(r.status, 400);
-    assert.match(r.body.error, /Card payment is not available right now/);
+    assert.match(r.body.error, /El pago con tarjeta no está disponible en este momento/, 'the customer checks out in Spanish');
     assert.doesNotMatch(r.body.error, /API Key|sk_test/);
     assert.strictEqual(stripe.state.creates, 1);
     assert.strictEqual(stripe.state.lastAuth, `Bearer ${FAKE_STRIPE_KEY}`);

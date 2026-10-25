@@ -262,7 +262,9 @@ const DEFAULT_SETTINGS = {
   bizum_phone: '',
   iban: '',
   iban_holder: '',
-  company_name: 'Vornetic',
+  iban_bic: '',
+  company_name: 'Vornetic',          // the trade name shown on the shop
+  company_holder: '',                // legal name of the owner (Titular), shown on the legal pages with the NIF
   company_nif: '',
   company_address: 'Madrid, España',
 };

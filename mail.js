@@ -131,7 +131,8 @@ const address = o => `${esc(o.customer_name)}<br>${esc(o.address)}<br>${esc(o.zi
 function paymentLine(o, s, lang) {
   const t = T(lang), a = eur(o.total_cents);
   if (o.payment_method === 'bizum') return t.pay_bizum(esc(s.bizum_phone), a, esc(o.ref));
-  if (o.payment_method === 'transfer') return t.pay_transfer(esc(s.iban), esc(s.iban_holder), a, esc(o.ref));
+  if (o.payment_method === 'transfer') return t.pay_transfer(esc(s.iban),
+    esc([s.iban_holder, s.iban_bic && 'BIC ' + s.iban_bic].filter(Boolean).join(' · ')), a, esc(o.ref));
   if (o.payment_method === 'card') return t.pay_card;
   return t.pay_contact;
 }

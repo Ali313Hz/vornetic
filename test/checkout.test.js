@@ -255,7 +255,7 @@ test('a product deleted while Stripe is opening the payment page: no order, the 
     assert.strictEqual((await s.srv.admin('DELETE', '/api/admin/products/' + s.product)).status, 200);   // removed meanwhile
     const r = await pending;
     assert.strictEqual(r.status, 400, JSON.stringify(r.body));
-    assert.match(r.body.error, /no longer available/);
+    assert.match(r.body.error, /ya no está disponible/, 'the customer checks out in Spanish');
     assert.deepStrictEqual(s.orders(), [], 'no payable order for a removed product');
     for (let i = 0; i < 50 && !s.stripe.state.expires; i++) await sleep(50);
     const sess = Object.values(s.stripe.state.sessions)[0];

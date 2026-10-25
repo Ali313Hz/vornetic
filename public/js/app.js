@@ -20,8 +20,8 @@ const T = {
     fits_car: 'Made for your car', fits_all: 'Fits most cars', from: 'from', sale: 'Sale', out: 'Sold out', made_for: 'Made to measure',
     trust1: 'Fast shipping', trust1s: 'Dispatched in 24–48 h', made_days: 'Made to order · ships in 3–5 working days',
     trust2: '3-year guarantee', trust2s: 'Legal guarantee in the EU',
-    trust3: '14-day returns', trust3s: 'No questions asked',
-    trust4: 'Secure payment', trust4s: 'Card, Bizum or transfer',
+    trust3: '14-day returns', trust3s: 'Custom EVO mats: only if faulty',
+    trust4: 'Secure payment', pm_card: 'Visa, Mastercard', pm_bizum: 'Bizum', pm_transfer: 'bank transfer', pm_contact: 'Payment details after the order',
     evo_for: 'EVO custom mats for your car', universal_title: 'Universal mats', lighting_title: 'Lighting',
     lighting_note: "Not sure which bulb your car uses? The code is printed on your current bulb, or send us a WhatsApp with your car.",
     add: 'Add to cart', added: 'Added to cart', view_cart: 'View cart', qty: 'Quantity',
@@ -106,8 +106,8 @@ const T = {
     fits_car: 'Hecho para tu coche', fits_all: 'Válido para la mayoría de coches', from: 'desde', sale: 'Oferta', out: 'Agotado', made_for: 'A medida',
     trust1: 'Envío rápido', trust1s: 'Sale en 24–48 h', made_days: 'Fabricado bajo pedido · sale en 3–5 días laborables',
     trust2: '3 años de garantía', trust2s: 'Garantía legal en la UE',
-    trust3: 'Devolución 14 días', trust3s: 'Sin dar explicaciones',
-    trust4: 'Pago seguro', trust4s: 'Tarjeta, Bizum o transferencia',
+    trust3: 'Devolución 14 días', trust3s: 'EVO a medida: solo si tienen defecto',
+    trust4: 'Pago seguro', pm_card: 'Visa, Mastercard', pm_bizum: 'Bizum', pm_transfer: 'transferencia', pm_contact: 'Datos de pago tras el pedido',
     evo_for: 'Alfombrillas EVO a medida para tu coche', universal_title: 'Alfombrillas universales', lighting_title: 'Iluminación',
     lighting_note: '¿No sabes qué bombilla lleva tu coche? El código viene impreso en tu bombilla actual, o escríbenos por WhatsApp con tu coche.',
     add: 'Añadir al carrito', added: 'Añadido al carrito', view_cart: 'Ver carrito', qty: 'Cantidad',
@@ -572,7 +572,10 @@ function bindFinder(after = () => go('/car')) {
 function trustHtml() {
   const items = [[ICON.truck, 'trust1'], [ICON.shield, 'trust2'], [ICON.back, 'trust3'], [ICON.lock, 'trust4']];
   const title = k => k === 'trust1' && CONFIG.shipping.free_es ? `${t('free_ship_over')} ${eur(CONFIG.shipping.free_es)}` : t(k);
-  return `<div class="trust">${items.map(([i, k]) => `<div>${i}<p style="margin:0"><b>${esc(title(k))}</b><span>${esc(t(k + 's'))}</span></p></div>`).join('')}</div>`;
+  // the payment methods the checkout really offers now, not a fixed list
+  const paid = ['card', 'bizum', 'transfer', 'contact'].filter(m => CONFIG.payments[m]).map(m => t('pm_' + m)).join(' · ');
+  const sub = k => k === 'trust4' ? paid : t(k + 's');
+  return `<div class="trust">${items.map(([i, k]) => `<div>${i}<p style="margin:0"><b>${esc(title(k))}</b><span>${esc(sub(k))}</span></p></div>`).join('')}</div>`;
 }
 function myCarBar(c) {
   return `<div class="mycar"><div><span class="muted">${esc(t('my_car'))}:</span> <b>${esc(myCar.label(c))}</b></div>
@@ -729,7 +732,7 @@ async function viewProduct(slug) {
           <summary>${esc(t('safety_title'))}</summary>
           ${p.manufacturer ? `<p><b>${esc(t('manufacturer'))}</b><br>${esc(p.manufacturer)}</p>` : ''}
           ${p.eu_responsible ? `<p><b>${esc(t('eu_resp'))}</b><br>${esc(p.eu_responsible)}</p>` : ''}
-          <p><b>${esc(t('distributor'))}</b><br>${esc(CONFIG.company.name)}${CONFIG.company.address ? ', ' + esc(CONFIG.company.address) : ''} · ${esc(CONFIG.email)}</p>
+          <p><b>${esc(t('distributor'))}</b><br>${esc(CONFIG.company.name)}${CONFIG.company.holder ? ` (${esc(CONFIG.company.holder)})` : ''}${CONFIG.company.address ? ', ' + esc(CONFIG.company.address) : ''} · ${esc(CONFIG.email)}</p>
           ${L(p.safety) ? `<p style="white-space:pre-line">${esc(L(p.safety))}</p>` : ''}
         </details>
       </div>
@@ -991,7 +994,7 @@ async function viewOrderDone(ref) {
   let body = '';
   if (o.payment_method === 'card') body = `<p>${esc(t(cardResultKey(o)))}</p>`;
   else if (o.payment_method === 'bizum') body = `<p>${esc(t('bizum_do'))}</p><div class="box paybox">${kv('Bizum', o.bizum_phone)}${kv(t('amount'), eur(o.total_cents))}${kv(t('concept'), o.ref)}</div>`;
-  else if (o.payment_method === 'transfer') body = `<p>${esc(t('transfer_do'))}</p><div class="box paybox">${kv('IBAN', o.iban)}${o.iban_holder ? kv(t('holder'), o.iban_holder) : ''}${kv(t('amount'), eur(o.total_cents))}${kv(t('concept'), o.ref)}</div>`;
+  else if (o.payment_method === 'transfer') body = `<p>${esc(t('transfer_do'))}</p><div class="box paybox">${kv('IBAN', o.iban)}${o.iban_holder ? kv(t('holder'), o.iban_holder) : ''}${o.iban_bic ? kv('BIC', o.iban_bic) : ''}${kv(t('amount'), eur(o.total_cents))}${kv(t('concept'), o.ref)}</div>`;
   else if (o.payment_method === 'contact') body = `<p>${esc(t('contact_do'))}</p>`;
   app.innerHTML = `<div class="wrap page"><div class="done">
     <div class="check">${ICON.check}</div>
@@ -1228,7 +1231,9 @@ function viewWithdraw() {
 /* ---------- Info pages (short, editable here) ---------- */
 function legalText(page) {
   const c = CONFIG.company, sh = CONFIG.shipping;
-  const who = `${esc(c.name)}${c.nif ? ` (NIF ${esc(c.nif)})` : ''}${c.address ? `, ${esc(c.address)}` : ''}`;
+  // The owner as the law asks: legal name (Titular) and NIF, with the trade name the shop uses
+  const whoIn = lang => `${c.holder ? `${esc(c.holder)}${lang === 'es' ? ', con nombre comercial ' : ', trading as '}${esc(c.name)}` : esc(c.name)}`
+    + `${c.nif ? ` (NIF ${esc(c.nif)})` : ''}${c.address ? `, ${esc(c.address)}` : ''}`;
   const mail = esc(CONFIG.email);
   const pt = CONFIG.countries.includes('PT');
   const fee = (cents, free, lang) => cents ? `${eur(cents)}${free ? (lang === 'es' ? ` (gratis desde ${eur(free)})` : ` (free from ${eur(free)})`) : ''}` : (lang === 'es' ? 'gratis' : 'free');
@@ -1244,22 +1249,22 @@ function legalText(page) {
         <p>For now we do not ship to the Canary Islands, Ceuta, Melilla or other countries. If you need it, write to us at ${mail}.</p>`],
       returns: ['Returns & guarantee', `<h2>Right of withdrawal (14 days)</h2>
         <p>You can withdraw from your purchase within <b>14 days</b> from the day you receive it, without giving a reason. The easiest way is the online form: ${wd('en')}. You can also send us any clear statement by email to ${mail}, for example:</p>
-        <p class="notice">To ${who}: I hereby give notice that I withdraw from my contract for the following goods: [products], ordered on [date] / received on [date]. Order number: [VN-…]. Name: […]. Address: […]. Date: […].</p>
+        <p class="notice">To ${whoIn('en')}: I hereby give notice that I withdraw from my contract for the following goods: [products], ordered on [date] / received on [date]. Order number: [VN-…]. Name: […]. Address: […]. Date: […].</p>
         <p>Send the products back unused, in their original packaging, within 14 days of telling us. <b>The cost of returning the products is paid by the customer</b>, unless the product is faulty or we sent the wrong item. We refund the price of the products and the standard delivery cost within 14 days of receiving them back, using the same payment method.</p>
         <p><b>Custom-fit EVO mats</b> are made to measure for your car. As personalised products, they cannot be returned unless they are faulty or do not match the car you ordered.</p>
         <h2>Guarantee</h2>
         <p>All products have the <b>3-year legal guarantee</b>. If something fails, contact us and we will repair, replace or refund it. In that case we pay the shipping costs.</p>`],
-      terms: ['Terms of sale', `<p>These terms apply to purchases on this website, operated by ${who}. Contact: ${mail}.</p>
+      terms: ['Terms of sale', `<p>These terms apply to purchases on this website, operated by ${whoIn('en')}. Contact: ${mail}.</p>
         <p>Prices are in euros and include VAT. Shipping costs are shown before you pay. The contract is formed when you receive the order confirmation by email.</p>
         <p>We ship to mainland Spain, the Balearic Islands${pt ? ' and Portugal' : ''}. Payment methods available are shown at checkout. Orders paid by Bizum or bank transfer are shipped once the payment is received; unpaid orders are cancelled after 5 days.</p>
         <p>You have the right of withdrawal described in our <a class="link" href="/info/returns" data-link>returns policy</a> (${wd('en')}) and the 3-year legal guarantee.</p>
         <p>These terms are governed by Spanish law. If you are a consumer, you may go to the courts of your place of residence.</p>`],
-      privacy: ['Privacy policy', `<p>Controller: ${who}. Contact: ${mail}.</p>
+      privacy: ['Privacy policy', `<p>Controller: ${whoIn('en')}. Contact: ${mail}.</p>
         <p>We only collect the data needed to manage your account and to process and ship your orders (name, address, email, phone and, if you add it, your car). Legal basis: performance of the contract. We keep it while your account is active and for as long as tax law requires.</p>
         <p>We share your data only with the carrier, our email provider (to send you the order emails) and, for card payments, with Stripe. Our hosting provider (the server this shop runs on) and the storage where we keep encrypted backups also hold the data, on our behalf only. We do not sell your data or send advertising without your consent.</p>
         <p>This website uses only one technical cookie to keep you logged in. It does not use tracking or advertising cookies, and it does not load fonts or other content from other websites (Stripe's payment page opens only when you pay by card). Your cart, your language and the delivery details you entered at checkout (so you don't have to type them again) are saved in your browser, on your device; you can delete them in your browser settings.</p>
         <p>You can access, correct or delete your data (including your account) by writing to ${mail}. You may also complain to the Spanish Data Protection Agency (aepd.es).</p>`],
-      legal: ['Legal notice', `<p>Owner of this website: ${who}. Email: ${mail}.</p><p>All content of this website belongs to its owner. Use of the website implies acceptance of these terms.</p>`],
+      legal: ['Legal notice', `<p>Owner of this website: ${whoIn('en')}. Email: ${mail}.</p><p>All content of this website belongs to its owner. Use of the website implies acceptance of these terms.</p>`],
     },
     es: {
       shipping: ['Envíos', `<p>Los pedidos salen en 24–48 horas laborables (alfombrillas EVO a medida: 3–5 días laborables, se fabrican bajo pedido). Recibirás el número de seguimiento por email y en tu cuenta.</p>
@@ -1271,22 +1276,22 @@ function legalText(page) {
         <p>Por ahora no enviamos a Canarias, Ceuta, Melilla ni a otros países. Si lo necesitas, escríbenos a ${mail}.</p>`],
       returns: ['Devoluciones y garantía', `<h2>Derecho de desistimiento (14 días)</h2>
         <p>Puedes desistir de tu compra en los <b>14 días</b> siguientes al día en que la recibes, sin dar explicaciones. Lo más fácil es el formulario online: ${wd('es')}. También puedes enviarnos cualquier declaración clara por email a ${mail}, por ejemplo:</p>
-        <p class="notice">A la atención de ${who}: Por la presente le comunico que desisto de mi contrato de venta de los siguientes bienes: [productos], pedidos el [fecha] / recibidos el [fecha]. Número de pedido: [VN-…]. Nombre: […]. Dirección: […]. Fecha: […].</p>
+        <p class="notice">A la atención de ${whoIn('es')}: Por la presente le comunico que desisto de mi contrato de venta de los siguientes bienes: [productos], pedidos el [fecha] / recibidos el [fecha]. Número de pedido: [VN-…]. Nombre: […]. Dirección: […]. Fecha: […].</p>
         <p>Devuelve los productos sin usar y en su embalaje original en los 14 días siguientes a comunicárnoslo. <b>El coste de la devolución corre a cargo del cliente</b>, salvo que el producto sea defectuoso o te hayamos enviado uno equivocado. Te devolvemos el precio de los productos y el coste del envío estándar en un máximo de 14 días desde que los recibimos, por el mismo medio de pago.</p>
         <p>Las <b>alfombrillas EVO a medida</b> se fabrican para tu coche. Al ser productos personalizados, no admiten devolución salvo que tengan un defecto o no correspondan al coche que pediste.</p>
         <h2>Garantía</h2>
         <p>Todos los productos tienen la <b>garantía legal de 3 años</b>. Si algo falla, contáctanos y lo reparamos, sustituimos o te devolvemos el dinero. En ese caso pagamos nosotros los envíos.</p>`],
-      terms: ['Condiciones de venta', `<p>Estas condiciones se aplican a las compras en esta web, gestionada por ${who}. Contacto: ${mail}.</p>
+      terms: ['Condiciones de venta', `<p>Estas condiciones se aplican a las compras en esta web, gestionada por ${whoIn('es')}. Contacto: ${mail}.</p>
         <p>Los precios están en euros e incluyen IVA. Los gastos de envío se muestran antes de pagar. El contrato se perfecciona cuando recibes la confirmación del pedido por email.</p>
         <p>Enviamos a España peninsular, Baleares${pt ? ' y Portugal' : ''}. Los métodos de pago disponibles se muestran al finalizar la compra. Los pedidos pagados por Bizum o transferencia se envían al recibir el pago; los pedidos no pagados se cancelan a los 5 días.</p>
         <p>Tienes el derecho de desistimiento descrito en nuestra <a class="link" href="/info/returns" data-link>política de devoluciones</a> (${wd('es')}) y la garantía legal de 3 años.</p>
         <p>Estas condiciones se rigen por la ley española. Si eres consumidor, puedes acudir a los tribunales de tu domicilio.</p>`],
-      privacy: ['Política de privacidad', `<p>Responsable: ${who}. Contacto: ${mail}.</p>
+      privacy: ['Política de privacidad', `<p>Responsable: ${whoIn('es')}. Contacto: ${mail}.</p>
         <p>Solo recogemos los datos necesarios para gestionar tu cuenta y tramitar y enviar tus pedidos (nombre, dirección, email, teléfono y, si lo añades, tu coche). Base legal: ejecución del contrato. Los conservamos mientras tu cuenta esté activa y el tiempo que exige la normativa fiscal.</p>
         <p>Solo compartimos tus datos con la empresa de transporte, nuestro proveedor de email (para enviarte los correos del pedido) y, en pagos con tarjeta, con Stripe. Nuestro proveedor de alojamiento (el servidor donde funciona la tienda) y el almacenamiento donde guardamos copias de seguridad cifradas también conservan los datos, únicamente por cuenta nuestra. No vendemos tus datos ni enviamos publicidad sin tu consentimiento.</p>
         <p>Esta web solo usa una cookie técnica para mantener tu sesión iniciada. No usa cookies de seguimiento ni de publicidad, y no carga fuentes ni otros contenidos de otras webs (la página de pago de Stripe solo se abre si pagas con tarjeta). Tu carrito, tu idioma y los datos de envío que escribiste al hacer el pedido (para no tener que escribirlos otra vez) se guardan en tu navegador, en tu dispositivo; puedes borrarlos en los ajustes del navegador.</p>
         <p>Puedes acceder, rectificar o suprimir tus datos (incluida tu cuenta) escribiendo a ${mail}. También puedes reclamar ante la Agencia Española de Protección de Datos (aepd.es).</p>`],
-      legal: ['Aviso legal', `<p>Titular de esta web: ${who}. Email: ${mail}.</p><p>Todos los contenidos de esta web pertenecen a su titular. El uso de la web implica la aceptación de estas condiciones.</p>`],
+      legal: ['Aviso legal', `<p>Titular de esta web: ${whoIn('es')}. Email: ${mail}.</p><p>Todos los contenidos de esta web pertenecen a su titular. El uso de la web implica la aceptación de estas condiciones.</p>`],
     },
   };
   return P[LANG][page];
