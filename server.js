@@ -283,6 +283,7 @@ app.get('/api/config', (req, res) => {
       ib: Number(s.ship_ib_cents), pt: Number(s.ship_pt_cents), free_far: Number(s.free_far_cents),
     },
     payments: availablePayments(s),
+    card_methods: STRIPE_KEY ? stripeMethods(s) : [],
     company: { name: s.company_name, holder: s.company_holder, nif: s.company_nif, address: s.company_address },
     countries: countries(s),
     mail: mail.enabled,
@@ -749,7 +750,18 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
     if (method === 'card') {
       if (checkoutId) checkoutsOpening.add(checkoutId);
       try {
-        session = await stripeCheckout({ ref, email, lang, items, shipping, base: baseUrl(req) });
+        const args = { ref, email, lang, items, shipping, base: baseUrl(req) };
+        const methods = stripeMethods(s);
+        try {
+          session = await stripeCheckout({ ...args, methods });
+        } catch (err) {
+          // Stripe refused the request itself (e.g. PayPal switched on here but not yet in the Stripe
+          // Dashboard): try once more with card only, so a setup mistake never blocks card payments.
+          // Not after a timeout or server error: the first page may exist.
+          if (methods.length === 1 || err.status !== 400) throw err;
+          console.error(`Stripe refused ${methods.join(', ')} for ${ref}, retrying with card only:`, err.message);
+          session = await stripeCheckout({ ...args, methods: ['card'] });
+        }
       } catch (err) {
         console.error(`Stripe checkout failed for ${ref}:`, err.message);
         throw new Error(orderMsg(lang, 'card_down'));
@@ -850,6 +862,13 @@ function availablePayments(s) {
   p.contact = !p.card && !p.bizum && !p.transfer;
   return p;
 }
+// What the Stripe payment page offers for a 'card' order. Only methods that answer at once (paid or
+// not) when the customer leaves the page: PayPal and Revolut Pay do (Stripe docs: "immediate
+// notification"), so the order flow stays the same as for cards. Each must also be switched on in
+// the Stripe Dashboard; the admin turns them on here once that is done.
+function stripeMethods(s) {
+  return ['card', ...(s.stripe_paypal === '1' ? ['paypal'] : []), ...(s.stripe_revolut === '1' ? ['revolut_pay'] : [])];
+}
 function paymentInfo(s, method) {
   if (method === 'bizum') return { bizum_phone: s.bizum_phone };
   if (method === 'transfer') return { iban: s.iban, iban_holder: s.iban_holder, iban_bic: s.iban_bic };
@@ -901,7 +920,7 @@ async function stripe(method, url, params) {
     signal: AbortSignal.timeout(15000),     // a hanging Stripe call counts as an error, never as an answer
   });
   const data = await r.json();
-  if (!r.ok) throw new Error(data.error?.message || 'Stripe error');
+  if (!r.ok) throw Object.assign(new Error(data.error?.message || 'Stripe error'), { status: r.status });
   return data;
 }
 // Close the Stripe payment page of a cancelled card order (best effort). Stripe refuses if the
@@ -943,12 +962,12 @@ function stripePaidAt(sess) {
   if (!Number.isInteger(t) || t <= 0 || t * 1000 > Date.now() + 5 * 60 * 1000) return null;
   return new Date(t * 1000).toISOString().slice(0, 19).replace('T', ' ');
 }
-function stripeCheckout({ ref, email, lang, items, shipping, base }) {
+function stripeCheckout({ ref, email, lang, items, shipping, base, methods = ['card'] }) {
   const p = {
     mode: 'payment',
-    // Card only: a card payment is finished (paid or not) when the customer leaves the payment page.
-    // Delayed methods (bank debits, vouchers…) could fail days later, which this shop can't detect.
-    'payment_method_types[0]': 'card',
+    // A fixed list (see stripeMethods), never Stripe's automatic choice: a payment is finished (paid
+    // or not) when the customer leaves the payment page. Delayed methods (bank debits, vouchers…)
+    // could fail days later, which this shop can't detect.
     customer_email: email,
     client_reference_id: ref,
     locale: lang,
@@ -959,6 +978,7 @@ function stripeCheckout({ ref, email, lang, items, shipping, base }) {
     // (see expireUnpaidOrders). Stripe accepts 30 minutes to 24 hours.
     expires_at: Math.floor(Date.now() / 1000) + CARD_SESSION_MINUTES * 60,
   };
+  methods.forEach((m, n) => { p[`payment_method_types[${n}]`] = m; });
   const lines = items.map(i => ({
     // the names the customer saw, in the language of the checkout
     name: (lang === 'es' ? i.name_es || i.name : i.name) + (i.car ? ` — ${i.car}` : ''),

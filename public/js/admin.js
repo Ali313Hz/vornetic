@@ -1016,7 +1016,10 @@ async function viewSettings() {
       Bizum ve havale: aşağıyı doldurursan ödeme sayfasında görünür. Hiçbiri yoksa müşteri "ödemeyi sonra konuşalım" seçeneğiyle sipariş verir.</p>
       ${f('bizum_phone', 'Bizum telefon numarası')}
       <div class="grid2">${f('iban', 'IBAN')}${f('iban_holder', 'Hesap sahibi')}</div>
-      ${f('iban_bic', 'SWIFT / BIC (isteğe bağlı)')}</div>
+      ${f('iban_bic', 'SWIFT / BIC (isteğe bağlı)')}
+      <p class="muted small" style="margin:14px 0 6px">Stripe ödeme sayfasında kartın yanında (önce Stripe Dashboard → Settings → Payment methods'ta aç; Stripe reddederse müşteri sadece kartla öder):</p>
+      <label class="chk"><input type="checkbox" id="spPaypal" ${s.stripe_paypal === '1' ? 'checked' : ''} ${me.stripe ? '' : 'disabled'}> PayPal</label>
+      <label class="chk"><input type="checkbox" id="spRevolut" ${s.stripe_revolut === '1' ? 'checked' : ''} ${me.stripe ? '' : 'disabled'}> Revolut Pay</label></div>
     <div class="box"><h3>Şirket bilgileri (yasal sayfalarda görünür)</h3>
       <div class="grid2">${f('company_name', 'Ticari ad (sitede görünen)')}${f('company_holder', 'Yasal ad soyad (Titular)')}</div>
       <div class="grid2">${f('company_nif', 'NIF / NIE')}${f('company_address', 'Adres')}</div></div>
@@ -1030,6 +1033,8 @@ async function viewSettings() {
       body[i.name] = i.dataset.money !== undefined ? String(Math.round((parseFloat(i.value.replace(',', '.')) || 0) * 100)) : i.value;
     });
     body.ship_pt_on = $('#ptOn').checked ? '1' : '0';
+    body.stripe_paypal = $('#spPaypal').checked ? '1' : '0';
+    body.stripe_revolut = $('#spRevolut').checked ? '1' : '0';
     try { await send('/api/admin/settings', body); toast('Kaydedildi'); }
     catch (err) { toast(err.message); }
   });

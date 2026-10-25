@@ -190,6 +190,9 @@ async function fakeStripe() {
         if (state.createDelayMs) await new Promise(r => setTimeout(r, state.createDelayMs));
         if (state.failCreate) return send(500, { error: { message: 'fake Stripe error on create' } });
         const params = Object.fromEntries(new URLSearchParams(body));
+        // state.refuseMethods = ['paypal']: like Stripe when a method is not switched on in the Dashboard
+        const refused = Object.entries(params).find(([k, v]) => k.startsWith('payment_method_types[') && (state.refuseMethods || []).includes(v));
+        if (refused) { state.refused = (state.refused || 0) + 1; return send(400, { error: { type: 'invalid_request_error', message: `The payment method type "${refused[1]}" is invalid.` } }); }
         const id = 'cs_test_' + (++state.creates);
         state.sessions[id] = { ref: params.client_reference_id, params, status: 'open', payment_status: 'unpaid' };
         return send(200, { id, url: 'https://checkout.example.test/pay/' + id });

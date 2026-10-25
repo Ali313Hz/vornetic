@@ -263,6 +263,8 @@ const DEFAULT_SETTINGS = {
   iban: '',
   iban_holder: '',
   iban_bic: '',
+  stripe_paypal: '0',                // '1' = PayPal on the Stripe payment page (switch it on in the Stripe Dashboard first)
+  stripe_revolut: '0',               // '1' = Revolut Pay on the Stripe payment page (same)
   company_name: 'Vornetic',          // the trade name shown on the shop
   company_holder: '',                // legal name of the owner (Titular), shown on the legal pages with the NIF
   company_nif: '',
