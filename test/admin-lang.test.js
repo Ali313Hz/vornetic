@@ -108,3 +108,44 @@ test('language switch asks before dropping edits on every screen; product and fi
   // search and filter boxes are not edits (their state is kept in variables and redrawn)
   for (const id of ['os', 'of', 'cs', 'fm', 'fq']) assert.match(js, new RegExp(`id="${id}" data-nodirty`), id);
 });
+
+// ---------- a successful save is not an unsaved edit (settings and bulbs stay on screen) ----------
+function loadSavedState() {
+  const src = adminSource();
+  const fn = src.match(/\nfunction savedState\(scope\) \{[\s\S]*?\n\}\n/);
+  assert.ok(fn, 'savedState() found in admin.js');
+  return new Function(`const $$ = (s, scope) => scope.fields; ${fn[0]}; return savedState;`)();
+}
+// a field like the browser's: setting default* keeps a value the user (or code) already changed
+const liveField = (value, o = {}) => ({ tagName: 'INPUT', type: 'text', disabled: false, closest: () => null, matches: () => true,
+  value, defaultValue: value, ...o });
+
+test('after a successful settings / bulbs save the language switch no longer warns; typing during the save still counts', () => {
+  const isUnsaved = loadIsUnsaved();
+  const savedState = loadSavedState();
+  const js = adminSource();
+  // both screens that only toast after saving mark their fields saved once the server answers
+  assert.match(js, /const saved = savedState\(\$\('#bText'\)\);\n\s*try \{\n\s*const r = await send\('\/api\/admin\/bulbs'[^\n]*\n\s*saved\(\);/);
+  assert.match(js, /const saved = savedState\(e\.target\);\n\s*try \{ await send\('\/api\/admin\/settings', body\); saved\(\);/);
+
+  // settings form: an e-mail typed and a PayPal switch ticked, then saved
+  const email = liveField('info@vornetic.com'); email.value = 'info+new@vornetic.com';
+  const paypal = liveField('', { type: 'checkbox', checked: true, defaultChecked: false });
+  const form = { matches: () => false, fields: [email, paypal] };
+  assert.deepStrictEqual([isUnsaved(email), isUnsaved(paypal)], [true, true], 'edited before saving');
+  savedState(form)();
+  assert.deepStrictEqual([isUnsaved(email), isUnsaved(paypal)], [false, false], 'saved: nothing to lose');
+
+  // bulb list (one textarea): typed more while the save was on its way
+  const bulbs = liveField('BMW|3|E90', { tagName: 'TEXTAREA', type: 'textarea' }); bulbs.value = 'BMW|3|E90\nH7';
+  const done = savedState(bulbs);
+  bulbs.value += '\nH1';
+  done();
+  assert.strictEqual(isUnsaved(bulbs), true, 'the text typed after pressing Save is still unsaved');
+  assert.strictEqual(bulbs.defaultValue, 'BMW|3|E90\nH7');
+
+  // a failed save leaves the edits unsaved (saved() is only called after send() succeeds)
+  const fail = liveField('a'); fail.value = 'b';
+  savedState({ matches: () => false, fields: [fail] });
+  assert.strictEqual(isUnsaved(fail), true);
+});

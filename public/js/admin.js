@@ -393,8 +393,10 @@ Escribe marca / modelo / generación exactamente como en la lista "Elige tu coch
     <textarea class="in mono" id="bText" rows="24" spellcheck="false">${esc(d.text)}</textarea>
     <div class="row-end" style="margin-top:12px"><button class="btn" id="bSave">${L('Kaydet', 'Guardar')}</button></div>`;
   $('#bSave').addEventListener('click', async () => {
+    const saved = savedState($('#bText'));
     try {
       const r = await send('/api/admin/bulbs', { text: $('#bText').value });
+      saved();
       $('#bErr').innerHTML = errs(r.errors);
       toast(L(`Kaydedildi · ${r.count} araba`, `Guardado · ${r.count} coches`));
     } catch (e) { toast(e.message); }
@@ -1091,7 +1093,8 @@ async function viewSettings() {
     body.ship_pt_on = $('#ptOn').checked ? '1' : '0';
     body.stripe_paypal = $('#spPaypal').checked ? '1' : '0';
     body.stripe_revolut = $('#spRevolut').checked ? '1' : '0';
-    try { await send('/api/admin/settings', body); toast(L('Kaydedildi', 'Guardado')); }
+    const saved = savedState(e.target);
+    try { await send('/api/admin/settings', body); saved(); toast(L('Kaydedildi', 'Guardado')); }
     catch (err) { toast(err.message); }
   });
   $('#testMail')?.addEventListener('click', async () => {
@@ -1121,6 +1124,18 @@ function isUnsaved(el) {
     return el.selectedIndex !== (first === -1 ? (opts.length ? 0 : -1) : first);
   }
   return el.value !== el.defaultValue;
+}
+// Screens that stay on screen after saving (settings, bulbs): once the server has the values, they
+// are the drawn state, not unsaved edits. Takes the values when the save is sent and applies them on
+// success, so anything typed while the save is on its way still counts as unsaved.
+function savedState(scope) {
+  const fields = (scope.matches('input, textarea, select') ? [scope] : $$('input, textarea, select', scope))
+    .map(el => [el, el.value, el.checked, el.selectedIndex]);
+  return () => fields.forEach(([el, value, checked, index]) => {
+    if (el.type === 'checkbox' || el.type === 'radio') el.defaultChecked = checked;
+    else if (el.tagName === 'SELECT') [...el.options].forEach((o, i) => { o.defaultSelected = i === index; });
+    else el.defaultValue = value;
+  });
 }
 const hasUnsavedEdits = () =>
   // the product editor and the finance form keep their state in code, so they always count as open edits
