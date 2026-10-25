@@ -14,6 +14,7 @@ const catalog = require('./catalog');
 const stripeConfig = require('./stripe');
 const finance = require('./finance');
 const { adminLang } = require('./admin-i18n');
+const { stripImageMeta } = require('./image-meta');
 
 const app = express();
 const PORT = process.env.PORT || 3300;
@@ -396,9 +397,11 @@ function saveReview(req, res) {
   if (req.file) {
     if (req.file.size > REVIEW_PHOTO_MB * 1024 * 1024) return res.status(400).json({ error: 'review_photo_big' });
     const ext = imageKind(req.file.buffer);
-    if (!ext) return res.status(400).json({ error: 'review_photo_type' });
+    // saved without EXIF/XMP (GPS position, time, camera): only the picture is published
+    const clean = ext && stripImageMeta(req.file.buffer, ext);
+    if (!clean) return res.status(400).json({ error: 'review_photo_type' });
     const name = 'r-' + crypto.randomBytes(8).toString('hex') + ext;
-    fs.writeFileSync(path.join(UPLOAD_DIR, name), req.file.buffer);
+    fs.writeFileSync(path.join(UPLOAD_DIR, name), clean);
     photo = '/uploads/' + name;
   } else if (b.remove_photo === '1') photo = '';
   const lang = b.lang === 'en' ? 'en' : 'es';

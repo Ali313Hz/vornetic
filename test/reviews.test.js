@@ -7,7 +7,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { startServer, CUSTOMER } = require('./helpers');
 
-const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
+// a real 1×1 PNG (photos are rebuilt without metadata, so they must be well-formed)
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgOMEAAAGUAMlBGJ3rAAAAAElFTkSuQmCC', 'base64');
+// the same PNG with a text chunk holding a location, as a phone or photo editor may write it
+const PNG_GPS = (() => {
+  const d = Buffer.from('Location\0GPS 40.4168N 3.7038W', 'latin1');
+  const h = Buffer.alloc(8); h.writeUInt32BE(d.length); h.write('tEXt', 4, 'latin1');
+  return Buffer.concat([PNG.subarray(0, 33), h, d, Buffer.alloc(4), PNG.subarray(33)]);   // after IHDR
+})();
 
 async function setup() {
   const srv = await startServer();
@@ -100,14 +107,18 @@ test('review photo: real JPG/PNG/WEBP only, max 5 MB, old photo removed', async 
       { status: 400, body: { error: 'review_photo_type' } });
     assert.deepStrictEqual(await c.review(p.slug, { rating: 5 }, { data: Buffer.alloc(5 * 1024 * 1024 + 10, 0xff), name: 'big.jpg' }),
       { status: 400, body: { error: 'review_photo_big' } });
+    // the right first bytes but not a readable image: refused too (it can't be cleaned, so it isn't saved)
+    assert.deepStrictEqual(await c.review(p.slug, { rating: 5 }, { data: Buffer.concat([PNG.subarray(0, 8), Buffer.alloc(64, 1)]), name: 'x.png' }),
+      { status: 400, body: { error: 'review_photo_type' } });
     assert.strictEqual((await srv.reviews(p.slug)).body.count, 0, 'nothing saved');
 
-    assert.strictEqual((await c.review(p.slug, { rating: 5 }, { data: PNG, name: 'IMG_1.HEIC' })).status, 200);
+    assert.strictEqual((await c.review(p.slug, { rating: 5 }, { data: PNG_GPS, name: 'IMG_1.HEIC' })).status, 200);
     const photo = (await srv.reviews(p.slug)).body.reviews[0].photo;
     assert.match(photo, /^\/uploads\/r-[0-9a-f]{16}\.png$/, 'stored with the real type');
     const file = path.join(srv.dataDir, 'uploads', path.basename(photo));
     assert.ok(fs.existsSync(file));
-    assert.strictEqual((await fetch(srv.base + photo)).status, 200);
+    const served = Buffer.from(await (await fetch(srv.base + photo)).arrayBuffer());
+    assert.ok(served.equals(PNG), 'published without the location text: only the picture');
 
     // removing the photo deletes the file; editing without a photo keeps it
     assert.strictEqual((await c.review(p.slug, { rating: 4 })).status, 200);
