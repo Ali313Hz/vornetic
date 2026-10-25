@@ -112,6 +112,26 @@ CREATE TABLE IF NOT EXISTS password_resets (
   user_id INTEGER NOT NULL,
   expires_at TEXT NOT NULL
 );
+
+-- Product reviews. Only written by a customer whose account has a shipped or delivered order with
+-- that product (order_id is that order); one per product and customer, which they can edit.
+-- The shop can reply or hide one (abusive / illegal content), never write or change one.
+CREATE TABLE IF NOT EXISTS reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  order_id INTEGER NOT NULL,
+  rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  text TEXT DEFAULT '',
+  photo TEXT DEFAULT '',
+  status TEXT DEFAULT 'visible',      -- visible | hidden
+  reply TEXT DEFAULT '',
+  reply_at TEXT,
+  lang TEXT DEFAULT 'es',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE (product_id, user_id)
+);
 `);
 
 // Columns added after the first version (safe to run on every start)

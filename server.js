@@ -313,6 +313,129 @@ app.get('/api/products/:slug', (req, res) => {
   res.json(publicProduct(p));
 });
 
+// ---------- Reviews (verified buyers only) ----------
+// A customer may review a product when an order of their account with that product has been
+// shipped or delivered. One review per product and customer; writing again edits it. The shop can
+// reply or hide one, never write or change one (no fake or edited reviews: EU consumer law).
+const REVIEW_PHOTO_MB = 5;
+const REVIEW_TEXT_MAX = 2000;
+const reviewUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: REVIEW_PHOTO_MB * 1024 * 1024 + 1, files: 1, fields: 5, fieldSize: 16 * 1024 },
+});
+// The real file type from its first bytes (the name and the browser's type can be anything)
+function imageKind(buf) {
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return '.jpg';
+  if (buf.length > 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return '.png';
+  if (buf.length > 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') return '.webp';
+  return null;
+}
+function removeUpload(src) {
+  if (!/^\/uploads\/[\w.-]+$/.test(src || '')) return;
+  try { fs.unlinkSync(path.join(UPLOAD_DIR, path.basename(src))); } catch {}
+}
+// The customer's latest shipped/delivered order of their account that contains this product
+function buyerOrder(userId, productId) {
+  const rows = db.prepare("SELECT id, items FROM orders WHERE user_id = ? AND status IN ('shipped', 'delivered') ORDER BY id DESC").all(userId);
+  for (const o of rows) {
+    try { if (JSON.parse(o.items).some(i => i.id === productId)) return o.id; } catch {}
+  }
+  return null;
+}
+// "María G." — first name and the initial of the next word (the first surname in Spain), never the full name or e-mail
+function reviewerName(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '';
+  return parts.length > 1 ? `${parts[0]} ${parts[1][0].toUpperCase()}.` : parts[0];
+}
+const publicReview = r => ({
+  id: r.id, name: reviewerName(r.user_name), rating: r.rating, text: r.text, photo: r.photo,
+  reply: r.reply, reply_at: r.reply_at, lang: r.lang, created_at: r.created_at,
+  edited: r.updated_at !== r.created_at, verified: true,
+});
+function reviewSummary(productId) {
+  const s = db.prepare("SELECT COUNT(*) AS count, AVG(rating) AS avg FROM reviews WHERE product_id = ? AND status = 'visible'").get(productId);
+  return { count: s.count, avg: s.count ? Math.round(s.avg * 10) / 10 : null };
+}
+const visibleProduct = slug => db.prepare(`SELECT id, slug FROM products WHERE slug = ? AND ${VISIBLE}`).get(slug);
+
+app.get('/api/products/:slug/reviews', (req, res) => {
+  const p = visibleProduct(req.params.slug);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const reviews = db.prepare(`SELECT r.*, u.name AS user_name FROM reviews r JOIN users u ON u.id = r.user_id
+    WHERE r.product_id = ? AND r.status = 'visible' ORDER BY r.created_at DESC, r.id DESC LIMIT 200`).all(p.id);
+  const u = currentUser(req);
+  let me = null;
+  if (u) {
+    const mine = db.prepare('SELECT * FROM reviews WHERE product_id = ? AND user_id = ?').get(p.id, u.id);
+    me = { can_review: !!(mine || buyerOrder(u.id, p.id)),
+      mine: mine && { rating: mine.rating, text: mine.text, photo: mine.photo, status: mine.status } };
+  }
+  res.json({ ...reviewSummary(p.id), reviews: reviews.map(publicReview), me });
+});
+
+app.post('/api/products/:slug/review', limit(20, 60 * 60 * 1000), requireUser, (req, res) => {
+  reviewUpload.single('photo')(req, res, err => {
+    if (err) return res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'review_photo_big' : 'review_bad' });
+    try { saveReview(req, res); } catch (e) { console.error('Review not saved:', e.message); res.status(500).json({ error: 'error' }); }
+  });
+});
+// (called by the route above once Multer has read the form)
+function saveReview(req, res) {
+  const p = visibleProduct(req.params.slug);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const old = db.prepare('SELECT * FROM reviews WHERE product_id = ? AND user_id = ?').get(p.id, req.user.id);
+  const orderId = buyerOrder(req.user.id, p.id) || old?.order_id;
+  if (!orderId) return res.status(403).json({ error: 'review_not_buyer' });
+  const b = req.body || {};
+  const rating = Number(b.rating);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: 'review_rating' });
+  const text = String(b.text ?? '').replace(/\r\n?/g, '\n').trim();
+  if (text.length > REVIEW_TEXT_MAX) return res.status(400).json({ error: 'review_text_long' });
+  let photo = old?.photo || '';
+  if (req.file) {
+    if (req.file.size > REVIEW_PHOTO_MB * 1024 * 1024) return res.status(400).json({ error: 'review_photo_big' });
+    const ext = imageKind(req.file.buffer);
+    if (!ext) return res.status(400).json({ error: 'review_photo_type' });
+    const name = 'r-' + crypto.randomBytes(8).toString('hex') + ext;
+    fs.writeFileSync(path.join(UPLOAD_DIR, name), req.file.buffer);
+    photo = '/uploads/' + name;
+  } else if (b.remove_photo === '1') photo = '';
+  const lang = b.lang === 'en' ? 'en' : 'es';
+  try {
+    if (old) {
+      // editing keeps the shop's decision (a hidden review stays hidden) and its reply
+      db.prepare("UPDATE reviews SET rating = ?, text = ?, photo = ?, lang = ?, order_id = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(rating, text, photo, lang, orderId, old.id);
+    } else {
+      db.prepare('INSERT INTO reviews (product_id, user_id, order_id, rating, text, photo, lang) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(p.id, req.user.id, orderId, rating, text, photo, lang);
+    }
+  } catch (e) {
+    if (req.file) removeUpload(photo);      // not saved: don't keep the new photo
+    throw e;
+  }
+  if (old?.photo && old.photo !== photo) removeUpload(old.photo);
+  res.json({ ok: true });
+}
+
+function deleteReviews(col, id) {
+  const rows = db.prepare(`SELECT photo FROM reviews WHERE ${col} = ?`).all(id);
+  db.prepare(`DELETE FROM reviews WHERE ${col} = ?`).run(id);
+  rows.forEach(r => removeUpload(r.photo));
+}
+
+app.delete('/api/products/:slug/review', requireUser, (req, res) => {
+  const p = visibleProduct(req.params.slug);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const r = db.prepare('SELECT * FROM reviews WHERE product_id = ? AND user_id = ?').get(p.id, req.user.id);
+  if (r) {
+    db.prepare('DELETE FROM reviews WHERE id = ?').run(r.id);
+    removeUpload(r.photo);
+  }
+  res.json({ ok: true });
+});
+
 // ---------- Customer accounts ----------
 app.post('/api/account/register', limit(10, 30 * 60 * 1000), (req, res) => {
   const b = req.body || {};
@@ -1227,6 +1350,7 @@ app.post('/api/admin/products/:id/stock', requireAdmin, (req, res) => {
 
 app.delete('/api/admin/products/:id', requireAdmin, (req, res) => {
   db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id);
+  deleteReviews('product_id', req.params.id);
   db.prepare('DELETE FROM product_views WHERE product_id = ?').run(req.params.id);
   res.json({ ok: true });
 });
@@ -1461,10 +1585,34 @@ app.put('/api/admin/customers/:id/password', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 app.delete('/api/admin/customers/:id', requireAdmin, (req, res) => {
-  // Orders are kept for accounting; only the account is removed
+  // Orders are kept for accounting; only the account is removed (with its reviews)
   db.prepare('UPDATE orders SET user_id = NULL WHERE user_id = ?').run(req.params.id);
+  deleteReviews('user_id', req.params.id);
   db.prepare('DELETE FROM user_sessions WHERE user_id = ?').run(req.params.id);
   db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// Reviews: the shop can reply or hide (abusive / illegal / off-topic content), never edit or write one
+app.get('/api/admin/reviews', requireAdmin, (req, res) => {
+  const st = ['visible', 'hidden'].includes(req.query.status) ? req.query.status : null;
+  res.json(db.prepare(`SELECT r.*, u.name AS user_name, u.email AS user_email, o.ref AS order_ref, p.name_es AS product_name, p.slug AS product_slug
+    FROM reviews r JOIN users u ON u.id = r.user_id LEFT JOIN orders o ON o.id = r.order_id LEFT JOIN products p ON p.id = r.product_id
+    ${st ? 'WHERE r.status = ?' : ''} ORDER BY r.id DESC LIMIT 500`).all(...(st ? [st] : [])));
+});
+app.put('/api/admin/reviews/:id', requireAdmin, (req, res) => {
+  const r = db.prepare('SELECT * FROM reviews WHERE id = ?').get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'Not found' });
+  const b = req.body || {};
+  const status = b.status === undefined ? r.status : b.status;
+  if (!['visible', 'hidden'].includes(status)) return res.status(400).json({ error: 'Geçersiz durum' });
+  let reply = r.reply, replyAt = r.reply_at;
+  if (b.reply !== undefined) {
+    reply = String(b.reply ?? '').replace(/\r\n?/g, '\n').trim();
+    if (reply.length > 1000) return res.status(400).json({ error: 'Cevap en fazla 1000 karakter' });
+    if (reply !== r.reply) replyAt = reply ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null;
+  }
+  db.prepare('UPDATE reviews SET status = ?, reply = ?, reply_at = ? WHERE id = ?').run(status, reply, replyAt, r.id);
   res.json({ ok: true });
 });
 
@@ -1538,6 +1686,7 @@ function pageHtml(req) {
     if (!p) status = 404;
     else {
       const pp = publicProduct(p);
+      const rv = reviewSummary(p.id);
       title = `${p.name_es} — Vornetic`;
       desc = p.desc_es.replace(/\s+/g, ' ').slice(0, 155);
       const img = /^https?:/.test(pp.image) ? pp.image : base + pp.image;
@@ -1548,6 +1697,8 @@ function pageHtml(req) {
         sku: p.slug, brand: { '@type': 'Brand', name: 'Vornetic' },
         offers: { '@type': 'Offer', priceCurrency: 'EUR', price: (pp.price_cents / 100).toFixed(2), url: base + urlPath,
           availability: pp.status === 'soon' ? 'https://schema.org/PreOrder' : p.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' },
+        // only real, visible reviews of verified buyers (shown on the page too)
+        ...(rv.count && { aggregateRating: { '@type': 'AggregateRating', ratingValue: rv.avg, reviewCount: rv.count, bestRating: 5, worstRating: 1 } }),
       }).replace(/</g, '\u003c')}</script>`;
     }
   }
