@@ -21,7 +21,7 @@ const T = {
     trust1: 'Fast shipping', trust1s: 'Dispatched in 24–48 h', made_days: 'Made to order · ships in 3–5 working days',
     trust2: '3-year guarantee', trust2s: 'Legal guarantee in the EU',
     trust3: '14-day returns', trust3s: 'Custom EVO mats: only if faulty',
-    trust4: 'Secure payment', pm_card: 'Visa, Mastercard', pm_bizum: 'Bizum', pm_transfer: 'bank transfer', pm_contact: 'Payment details after the order',
+    trust4: 'Secure payment', pm_card: 'Visa, Mastercard', pm_paypal: 'PayPal', pm_revolut_pay: 'Revolut Pay', pm_bizum: 'Bizum', pm_transfer: 'bank transfer', pay_safe: 'Secure payments', pm_contact: 'Payment details after the order',
     evo_for: 'EVO custom mats for your car', universal_title: 'Universal mats', lighting_title: 'Lighting',
     lighting_note: "Not sure which bulb your car uses? The code is printed on your current bulb, or send us a WhatsApp with your car.",
     add: 'Add to cart', added: 'Added to cart', view_cart: 'View cart', qty: 'Quantity',
@@ -33,7 +33,7 @@ const T = {
     contact_details: 'Contact', shipping_address: 'Shipping address',
     full_name: 'Full name', email: 'Email', phone: 'Phone', address: 'Address (street, number, floor)',
     city: 'City', zip: 'Postcode', province: 'Province / region', country: 'Country', notes: 'Order notes (optional)',
-    payment: 'Payment', pay_card: 'Card, Apple Pay or Google Pay', pay_card_s: 'Secure payment via Stripe',
+    payment: 'Payment', pay_card: 'Card, Apple Pay, Google Pay', pay_card_s: 'Secure payment via Stripe',
     pay_bizum: 'Bizum', pay_bizum_s: 'Send the amount after placing the order',
     pay_transfer: 'Bank transfer', pay_transfer_s: 'We ship once the payment arrives',
     pay_contact: 'Pay after confirmation', pay_contact_s: 'We will contact you with the payment details',
@@ -107,7 +107,7 @@ const T = {
     trust1: 'Envío rápido', trust1s: 'Sale en 24–48 h', made_days: 'Fabricado bajo pedido · sale en 3–5 días laborables',
     trust2: '3 años de garantía', trust2s: 'Garantía legal en la UE',
     trust3: 'Devolución 14 días', trust3s: 'EVO a medida: solo si tienen defecto',
-    trust4: 'Pago seguro', pm_card: 'Visa, Mastercard', pm_bizum: 'Bizum', pm_transfer: 'transferencia', pm_contact: 'Datos de pago tras el pedido',
+    trust4: 'Pago seguro', pm_card: 'Visa, Mastercard', pm_paypal: 'PayPal', pm_revolut_pay: 'Revolut Pay', pm_bizum: 'Bizum', pm_transfer: 'transferencia', pay_safe: 'Pagos seguros', pm_contact: 'Datos de pago tras el pedido',
     evo_for: 'Alfombrillas EVO a medida para tu coche', universal_title: 'Alfombrillas universales', lighting_title: 'Iluminación',
     lighting_note: '¿No sabes qué bombilla lleva tu coche? El código viene impreso en tu bombilla actual, o escríbenos por WhatsApp con tu coche.',
     add: 'Añadir al carrito', added: 'Añadido al carrito', view_cart: 'Ver carrito', qty: 'Cantidad',
@@ -119,7 +119,7 @@ const T = {
     contact_details: 'Contacto', shipping_address: 'Dirección de envío',
     full_name: 'Nombre y apellidos', email: 'Email', phone: 'Teléfono', address: 'Dirección (calle, número, piso)',
     city: 'Ciudad', zip: 'Código postal', province: 'Provincia', country: 'País', notes: 'Notas del pedido (opcional)',
-    payment: 'Pago', pay_card: 'Tarjeta, Apple Pay o Google Pay', pay_card_s: 'Pago seguro con Stripe',
+    payment: 'Pago', pay_card: 'Tarjeta, Apple Pay, Google Pay', pay_card_s: 'Pago seguro con Stripe',
     pay_bizum: 'Bizum', pay_bizum_s: 'Envía el importe después de hacer el pedido',
     pay_transfer: 'Transferencia bancaria', pay_transfer_s: 'Enviamos cuando recibimos el pago',
     pay_contact: 'Pagar tras confirmación', pay_contact_s: 'Te contactamos con los datos de pago',
@@ -479,6 +479,7 @@ function footer() {
       ${CONFIG.company.address ? `<span>${esc(CONFIG.company.address)}</span>` : ''}
       <a href="/account" data-link style="margin-top:8px">${esc(t('account'))}</a>
     </div>
+    ${payBadges() ? `<div class="pay-row"><span>${esc(t('pay_safe'))}</span>${payBadges()}</div>` : ''}
     <div class="copy">© ${new Date().getFullYear()} ${esc(CONFIG.company.name || 'Vornetic')}</div>`;
   if (wa && !$('.wa-float')) {
     const f = document.createElement('a');
@@ -569,11 +570,33 @@ function bindFinder(after = () => go('/car')) {
   btn.addEventListener('click', () => { if (chosen) { myCar.set(chosen); after(); } });
 }
 
+// Payment badges (self-hosted, no outside images: the CSP allows only this site). Text and shape
+// stand-ins for the brands' acceptance marks; the label is read out by screen readers.
+const PAY_BADGE = {
+  visa: () => '<span class="pm pm-visa">VISA</span>',
+  mastercard: () => '<span class="pm pm-mc"><i></i><i></i></span>',
+  paypal: () => '<span class="pm pm-pp"><b>Pay</b><b>Pal</b></span>',
+  revolut_pay: () => '<span class="pm pm-rv">Revolut <b>Pay</b></span>',
+  bizum: () => '<span class="pm pm-bz">bizum</span>',
+  transfer: () => `<span class="pm pm-tr">${esc(t('pm_transfer'))}</span>`,
+};
+const BADGE_LABEL = { visa: 'Visa', mastercard: 'Mastercard', paypal: 'PayPal', revolut_pay: 'Revolut Pay', bizum: 'Bizum' };
+// the extra Stripe methods (PayPal, Revolut Pay) the payment page shows besides cards
+const cardExtras = () => (CONFIG.card_methods || []).filter(m => m !== 'card');
+// badges for one checkout method, or (no argument) for every method the shop offers now
+function payBadges(method) {
+  const of = m => m === 'card' ? ['visa', 'mastercard', ...cardExtras()] : m === 'bizum' || m === 'transfer' ? [m] : [];
+  const list = method ? of(method) : ['card', 'bizum', 'transfer'].filter(m => CONFIG.payments[m]).flatMap(of);
+  if (!list.length) return '';
+  const label = list.map(b => BADGE_LABEL[b] || t('pm_' + b)).join(', ');
+  return `<span class="pms" role="img" aria-label="${esc(label)}">${list.map(b => PAY_BADGE[b]()).join('')}</span>`;
+}
 function trustHtml() {
   const items = [[ICON.truck, 'trust1'], [ICON.shield, 'trust2'], [ICON.back, 'trust3'], [ICON.lock, 'trust4']];
   const title = k => k === 'trust1' && CONFIG.shipping.free_es ? `${t('free_ship_over')} ${eur(CONFIG.shipping.free_es)}` : t(k);
   // the payment methods the checkout really offers now, not a fixed list
-  const paid = ['card', 'bizum', 'transfer', 'contact'].filter(m => CONFIG.payments[m]).map(m => t('pm_' + m)).join(' · ');
+  const paid = ['card', 'bizum', 'transfer', 'contact'].filter(m => CONFIG.payments[m])
+    .map(m => m === 'card' ? [t('pm_card'), ...cardExtras().map(x => t('pm_' + x))].join(', ') : t('pm_' + m)).join(' · ');
   const sub = k => k === 'trust4' ? paid : t(k + 's');
   return `<div class="trust">${items.map(([i, k]) => `<div>${i}<p style="margin:0"><b>${esc(title(k))}</b><span>${esc(sub(k))}</span></p></div>`).join('')}</div>`;
 }
@@ -889,7 +912,7 @@ async function viewCheckout() {
         </div>
         <div class="box"><h3>${esc(t('payment'))}</h3>
           <div class="pay">${methods.map((m, i) => `<label><input type="radio" name="payment_method" value="${m}" ${(methods.includes(saved.payment_method) ? m === saved.payment_method : !i) ? 'checked' : ''}>
-            <span><b style="font-weight:600">${esc(t('pay_' + m))}</b><small>${esc(t('pay_' + m + '_s'))}</small></span></label>`).join('')}</div>
+            <span><b style="font-weight:600">${esc(m === 'card' ? [t('pay_card'), ...cardExtras().map(x => t('pm_' + x))].join(', ') : t('pay_' + m))}</b><small>${esc(t('pay_' + m + '_s'))}</small></span>${payBadges(m)}</label>`).join('')}</div>
         </div>
       </div>
       <aside class="summary">
@@ -1261,7 +1284,7 @@ function legalText(page) {
         <p>These terms are governed by Spanish law. If you are a consumer, you may go to the courts of your place of residence.</p>`],
       privacy: ['Privacy policy', `<p>Controller: ${whoIn('en')}. Contact: ${mail}.</p>
         <p>We only collect the data needed to manage your account and to process and ship your orders (name, address, email, phone and, if you add it, your car). Legal basis: performance of the contract. We keep it while your account is active and for as long as tax law requires.</p>
-        <p>We share your data only with the carrier, our email provider (to send you the order emails) and, for card payments, with Stripe. Our hosting provider (the server this shop runs on) and the storage where we keep encrypted backups also hold the data, on our behalf only. We do not sell your data or send advertising without your consent.</p>
+        <p>We share your data only with the carrier, our email provider (to send you the order emails) and, for card payments, with Stripe (and, if you choose PayPal or Revolut Pay on Stripe's payment page, also with that provider). Our hosting provider (the server this shop runs on) and the storage where we keep encrypted backups also hold the data, on our behalf only. We do not sell your data or send advertising without your consent.</p>
         <p>This website uses only one technical cookie to keep you logged in. It does not use tracking or advertising cookies, and it does not load fonts or other content from other websites (Stripe's payment page opens only when you pay by card). Your cart, your language and the delivery details you entered at checkout (so you don't have to type them again) are saved in your browser, on your device; you can delete them in your browser settings.</p>
         <p>You can access, correct or delete your data (including your account) by writing to ${mail}. You may also complain to the Spanish Data Protection Agency (aepd.es).</p>`],
       legal: ['Legal notice', `<p>Owner of this website: ${whoIn('en')}. Email: ${mail}.</p><p>All content of this website belongs to its owner. Use of the website implies acceptance of these terms.</p>`],
@@ -1288,7 +1311,7 @@ function legalText(page) {
         <p>Estas condiciones se rigen por la ley española. Si eres consumidor, puedes acudir a los tribunales de tu domicilio.</p>`],
       privacy: ['Política de privacidad', `<p>Responsable: ${whoIn('es')}. Contacto: ${mail}.</p>
         <p>Solo recogemos los datos necesarios para gestionar tu cuenta y tramitar y enviar tus pedidos (nombre, dirección, email, teléfono y, si lo añades, tu coche). Base legal: ejecución del contrato. Los conservamos mientras tu cuenta esté activa y el tiempo que exige la normativa fiscal.</p>
-        <p>Solo compartimos tus datos con la empresa de transporte, nuestro proveedor de email (para enviarte los correos del pedido) y, en pagos con tarjeta, con Stripe. Nuestro proveedor de alojamiento (el servidor donde funciona la tienda) y el almacenamiento donde guardamos copias de seguridad cifradas también conservan los datos, únicamente por cuenta nuestra. No vendemos tus datos ni enviamos publicidad sin tu consentimiento.</p>
+        <p>Solo compartimos tus datos con la empresa de transporte, nuestro proveedor de email (para enviarte los correos del pedido) y, en pagos con tarjeta, con Stripe (y, si eliges PayPal o Revolut Pay en la página de pago de Stripe, también con ese proveedor). Nuestro proveedor de alojamiento (el servidor donde funciona la tienda) y el almacenamiento donde guardamos copias de seguridad cifradas también conservan los datos, únicamente por cuenta nuestra. No vendemos tus datos ni enviamos publicidad sin tu consentimiento.</p>
         <p>Esta web solo usa una cookie técnica para mantener tu sesión iniciada. No usa cookies de seguimiento ni de publicidad, y no carga fuentes ni otros contenidos de otras webs (la página de pago de Stripe solo se abre si pagas con tarjeta). Tu carrito, tu idioma y los datos de envío que escribiste al hacer el pedido (para no tener que escribirlos otra vez) se guardan en tu navegador, en tu dispositivo; puedes borrarlos en los ajustes del navegador.</p>
         <p>Puedes acceder, rectificar o suprimir tus datos (incluida tu cuenta) escribiendo a ${mail}. También puedes reclamar ante la Agencia Española de Protección de Datos (aepd.es).</p>`],
       legal: ['Aviso legal', `<p>Titular de esta web: ${whoIn('es')}. Email: ${mail}.</p><p>Todos los contenidos de esta web pertenecen a su titular. El uso de la web implica la aceptación de estas condiciones.</p>`],
