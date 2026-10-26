@@ -95,7 +95,7 @@ const T = {
     forgot_intro: 'Enter your email and we will send you a link to choose a new password.', send_link: 'Send link',
     forgot_sent: 'If there is an account with this email, you will receive a link in a few minutes. Check your spam folder too.',
     new_password_title: 'Choose a new password', back_login: 'Back to log in',
-    soon: 'Coming soon', soon_short: 'soon', soon_note: 'This product will be available very soon.',
+    soon: 'Coming soon', soon_short: 'soon', opt_out: 'Out of stock', soon_note: 'This product will be available very soon.',
     notify_wa: 'Tell me when it arrives', notify_msg: 'Please tell me when it arrives', cat_empty: 'New products are coming soon.',
     bulbs_title: 'Bulbs for your car', b_low: 'Low beam (halogen)', b_high: 'High beam', b_fog: 'Fog lights',
     b_xenon: 'Xenon headlights (factory)', b_h4: 'Headlights (low + high beam)', b_see: 'See', b_none: 'Not sold here',
@@ -195,7 +195,7 @@ const T = {
     forgot_intro: 'Escribe tu email y te enviaremos un enlace para elegir una nueva contraseña.', send_link: 'Enviar enlace',
     forgot_sent: 'Si existe una cuenta con este email, recibirás un enlace en unos minutos. Mira también en la carpeta de spam.',
     new_password_title: 'Elige una nueva contraseña', back_login: 'Volver a iniciar sesión',
-    soon: 'Próximamente', soon_short: 'pronto', soon_note: 'Este producto estará disponible muy pronto.',
+    soon: 'Próximamente', soon_short: 'pronto', opt_out: 'Agotado', soon_note: 'Este producto estará disponible muy pronto.',
     notify_wa: 'Avísame cuando llegue', notify_msg: 'Avísame cuando llegue', cat_empty: 'Muy pronto tendremos productos aquí.',
     bulbs_title: 'Bombillas de tu coche', b_low: 'Luz de cruce (halógena)', b_high: 'Luz de carretera', b_fog: 'Antiniebla',
     b_xenon: 'Faros xenón (de serie)', b_h4: 'Faros (cruce + carretera)', b_see: 'Ver', b_none: 'No disponible',
@@ -293,12 +293,13 @@ function comboPrice(p, ids) {
 }
 function comboSellable(p, ids) {
   if (p.combos[ids.join('|')]?.off) return false;
-  return ids.every((id, i) => !p.options[i].values.find(v => v.id === id)?.soon);
+  return ids.every((id, i) => { const v = p.options[i].values.find(x => x.id === id); return !v?.soon && !v?.out; });
 }
 const fitsSel = (p, ids, sel) => ids.every((id, i) => !sel[p.options[i].id] || sel[p.options[i].id] === id);
-// 'ok' | 'soon' (coming soon) | 'off' (not sold together with the other choices)
+// 'ok' | 'soon' (coming soon) | 'out' (out of stock) | 'off' (not sold together with the other choices)
 function valueState(p, sel, oid, vid) {
   if (valOf(p, oid, vid)?.soon) return 'soon';
+  if (valOf(p, oid, vid)?.out) return 'out';
   const test = { ...sel, [oid]: vid };
   return allCombos(p).some(ids => fitsSel(p, ids, test) && comboSellable(p, ids)) ? 'ok' : 'off';
 }
@@ -771,7 +772,7 @@ async function viewProduct(slug) {
         ${p.options.map(o => `<div class="opt-group" data-o="${esc(o.id)}">
           <span>${esc(L(o))}: <b data-chosen></b></span>
           <div class="opts">${o.values.map(v => `<button type="button" class="opt" data-v="${esc(v.id)}">${esc(L(v))}${v.soon
-            ? `<small>${esc(t('soon_short'))}</small>` : ''}</button>`).join('')}</div>
+            ? `<small>${esc(t('soon_short'))}</small>` : v.out ? `<small>${esc(t('opt_out'))}</small>` : ''}</button>`).join('')}</div>
         </div>`).join('')}
         <div id="pErr"></div>
         <div class="buy-row">
@@ -818,6 +819,7 @@ async function viewProduct(slug) {
         const st = valueState(p, sel, oid, b.dataset.v);
         b.classList.toggle('on', sel[oid] === b.dataset.v);
         b.classList.toggle('is-soon', st === 'soon');
+        b.classList.toggle('is-out', st === 'out');
         b.disabled = st !== 'ok';
       });
       $('[data-chosen]', g).textContent = sel[oid] ? L(valOf(p, oid, sel[oid])) : '';

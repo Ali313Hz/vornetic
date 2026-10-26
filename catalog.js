@@ -1,8 +1,9 @@
 // catalog.js — product options, variant combinations, prices and media
 //
 // A product is stored with three JSON columns:
-//   opts   : [{ id, en, es, values: [{ id, en, es, delta, soon, media: [Media] }] }]
-//            delta = price difference in cents for this choice, soon = "coming soon" (not sellable yet)
+//   opts   : [{ id, en, es, values: [{ id, en, es, delta, soon, out, media: [Media] }] }]
+//            delta = price difference in cents for this choice, soon = "coming soon" (not sellable yet),
+//            out = out of stock ("Agotado", not sellable now); a value is never both
 //   combos : { "valueId|valueId": { off, price, media } }   — only combinations that differ from the default
 //            off = not sold, price = fixed price in cents (instead of base + deltas), media = own photos/videos
 //   media  : [Media]   — general gallery, first item is the main picture
@@ -44,7 +45,7 @@ function priceOf(base, options, combos, ids) {
 }
 function sellable(options, combos, ids) {
   if (combos[keyOf(ids)]?.off) return false;
-  return ids.every((id, i) => !options[i].values.find(v => v.id === id)?.soon);
+  return ids.every((id, i) => { const v = options[i].values.find(x => x.id === id); return !v?.soon && !v?.out; });
 }
 
 // For the shop: what the customer sees
@@ -79,12 +80,13 @@ function priceForSelection(row, sel) {
   const ids = [], labels = [], labelsEs = [];
   for (const o of options) {
     const v = o.values.find(x => x.id === (sel || {})[o.id]);
-    if (!v) throw new Error(`Please choose: ${o.en}`);
+    if (!v) throw Object.assign(new Error(`Please choose: ${o.en}`), { code: 'choose' });
+    if (v.out) throw Object.assign(new Error(`Out of stock: ${row.name_en} — ${o.en}: ${v.en}`), { code: 'out', value: v });
     ids.push(v.id);
     labels.push(`${o.en}: ${v.en}`);
     labelsEs.push(`${o.es || o.en}: ${v.es || v.en}`);
   }
-  if (options.length && !sellable(options, combos, ids)) throw new Error(`Not available: ${row.name_en} — ${labels.join(', ')}`);
+  if (options.length && !sellable(options, combos, ids)) throw Object.assign(new Error(`Not available: ${row.name_en} — ${labels.join(', ')}`), { code: 'unavailable' });
   return { unit: priceOf(row.price_cents, options, combos, ids), labels, labelsEs };
 }
 
@@ -108,7 +110,8 @@ function cleanOptions(list) {
       en: str(v.en, 80) || str(v.es, 80),
       es: str(v.es, 80) || str(v.en, 80),
       delta: int(v.delta),
-      soon: !!v.soon,
+      soon: !!v.soon && !v.out,
+      out: !!v.out,
       media: cleanMedia(v.media, 20),
     })).filter(v => v.en),
   })).filter(o => o.values.length);

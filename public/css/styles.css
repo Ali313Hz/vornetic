@@ -338,6 +338,8 @@ select.in:disabled { background-color: var(--soft); color: var(--muted); }
 .card.is-soon .ph img { opacity: .75; }
 .opt.is-soon { border-style: dashed; color: var(--muted); text-decoration: none; }
 .opt.is-soon small { color: #2c4a8a; }
+.opt.is-out { border-style: dashed; color: var(--muted); }
+.opt.is-out small { color: var(--bad); }
 .soon-note { margin: -6px 0 18px; background: #eef2fb; border-color: #d6def2; color: #2c4a8a; }
 
 /* ---------- Phones: buy button always reachable ---------- */
