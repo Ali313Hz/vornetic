@@ -235,11 +235,22 @@ test('an order larger than the stock is refused and changes nothing', async () =
   const { srv, close } = await setup();
   try {
     const p = await srv.newProduct(3);
-    const r = await srv.order([{ id: p, qty: 10 }]);
+    const r = await srv.order([{ id: p, qty: 10 }]);   // (a Spanish checkout: CUSTOMER.lang = 'es')
     assert.strictEqual(r.status, 400);
-    assert.match(r.body.error, /Not enough stock: Test item \(only 3 left, you asked for 10\)/);
+    assert.match(r.body.error, /No hay stock suficiente: Artículo test \(quedan 3, has pedido 10\)/);
     assert.strictEqual(await srv.stock(p), 3);
     assert.strictEqual((await srv.orders()).length, 0, 'no order may be saved');
+  } finally { await close(); }
+});
+
+test('the not-enough-stock message is in the language of the checkout (English page: English, English name)', async () => {
+  const { srv, close } = await setup();
+  try {
+    const p = await srv.newProduct(2);
+    const r = await srv.order([{ id: p, qty: 5 }], { lang: 'en' });
+    assert.strictEqual(r.status, 400);
+    assert.match(r.body.error, /Not enough stock: Test item \(only 2 left, you asked for 5\)/);
+    assert.strictEqual(await srv.stock(p), 2);
   } finally { await close(); }
 });
 

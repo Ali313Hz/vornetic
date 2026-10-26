@@ -5,6 +5,7 @@
 /* ================= i18n ================= */
 const T = {
   en: {
+    site_title: 'Vornetic — Car Lighting & Mats',
     nav_car: 'Shop by car', nav_xenon: 'Xenon', nav_led: 'LED', nav_mats: 'Car mats', nav_home: 'Home',
     hero_title: 'Lighting and mats for your car',
     hero_lead: 'Xenon and LED bulbs, universal mats and EVO mats made to measure. Shipped from Spain.',
@@ -90,6 +91,7 @@ const T = {
     countries: { ES: 'Spain', PT: 'Portugal', FR: 'France', IT: 'Italy', DE: 'Germany', NL: 'Netherlands', BE: 'Belgium', AT: 'Austria', IE: 'Ireland', LU: 'Luxembourg' },
   },
   es: {
+    site_title: 'Vornetic — Bombillas xenón, LED y alfombrillas para coche',   // = the title the server sends for "/"
     nav_car: 'Buscar por coche', nav_xenon: 'Xenón', nav_led: 'LED', nav_mats: 'Alfombrillas', nav_home: 'Inicio',
     hero_title: 'Iluminación y alfombrillas para tu coche',
     hero_lead: 'Bombillas xenón y LED, alfombrillas universales y alfombrillas EVO a medida. Enviamos desde España.',
@@ -493,7 +495,7 @@ function toast(html) {
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 3500);
 }
-const setTitle = s => { document.title = s ? `${s} — Vornetic` : 'Vornetic — Car Lighting & Mats'; };
+const setTitle = s => { document.title = s ? `${s} — Vornetic` : t('site_title'); };
 
 /* ================= components ================= */
 const catBySlug = slug => (CATS || []).find(c => c.slug === slug);
@@ -856,7 +858,8 @@ async function viewCheckout() {
   // back exactly as sent — ahead of the account's details — so paying again continues the same attempt
   // and order. Another customer's pending attempt is discarded (checkout-attempt.js).
   const pending = CheckoutAttempt.pendingFields(browserStorage(), CheckoutAttempt.ownerOf(ME));
-  const saved = { ...store.get('vaddr', {}), ...fromAccount, ...pending };
+  // the address remembered from this customer's last checkout (never another customer's: checkout-attempt.js)
+  const saved = { ...CheckoutAttempt.savedAddress(browserStorage(), CheckoutAttempt.ownerOf(ME)), ...fromAccount, ...pending };
   const methods = ['card', 'bizum', 'transfer', 'contact'].filter(m => CONFIG.payments[m]);
   const cancelled = new URLSearchParams(location.search).has('cancelled');
   const f = (name, label, attrs = '') => `<label class="f"><span>${esc(label)}</span><input class="in" name="${name}" value="${esc(saved[name] || '')}" ${attrs}></label>`;
@@ -926,7 +929,7 @@ async function viewCheckout() {
     }
 
     const { notes, payment_method, ...addr } = data;
-    store.set('vaddr', addr);
+    CheckoutAttempt.rememberAddress(browserStorage(), CheckoutAttempt.ownerOf(ME), addr);
     const btn = $('#coBtn'); btn.disabled = true;
     try {
       const body = { ...data, lang: LANG, items: cart.get().map(i => ({ id: i.id, qty: i.qty, options: i.options, car: i.car })) };
@@ -1017,7 +1020,7 @@ async function viewAccount(tab) {
   </div>`;
   $('#logout').addEventListener('click', async () => {
     await post('/api/account/logout');
-    ME = null; myCar.clear(); store.del('vaddr');
+    ME = null; myCar.clear(); CheckoutAttempt.forgetAddress(browserStorage());
     CheckoutAttempt.clear(browserStorage());   // the next person on this browser must not get this checkout
     go('/');
   });

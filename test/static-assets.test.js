@@ -61,5 +61,5 @@ test('the privacy policy matches what the site does (ES and EN)', () => {
     'Tu carrito, tu idioma y los datos de envío que escribiste al hacer el pedido',
   ]) assert.ok(js.includes(s), s);
   // what the text says is kept in the browser is what the shop keeps there
-  assert.match(js, /store\.set\('vaddr', addr\)/, 'delivery details are indeed saved in the browser');
+  assert.match(js, /CheckoutAttempt\.rememberAddress\(browserStorage\(\), CheckoutAttempt\.ownerOf\(ME\), addr\)/, 'delivery details are indeed saved in the browser');
 });

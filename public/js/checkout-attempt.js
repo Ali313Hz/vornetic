@@ -42,7 +42,24 @@
     return a.fields || {};
   }
 
-  const api = { attemptId, pendingFields, clear, ownerOf, hashText, KEY };
+  // The delivery address of the last checkout, remembered in this browser to pre-fill the next one —
+  // for the same customer only. Someone else on this browser (another account, or a guest after an
+  // account, or an account after a guest) never gets it: it is thrown away. An address saved by an
+  // older shop page has no owner, so it is thrown away too. Logging out forgets it.
+  const ADDR_KEY = 'vaddr';
+  function rememberAddress(storage, owner, addr) {
+    try { if (storage) storage.setItem(ADDR_KEY, JSON.stringify({ owner, addr })); } catch {}
+  }
+  const forgetAddress = storage => { try { if (storage) storage.removeItem(ADDR_KEY); } catch {} };
+  function savedAddress(storage, owner) {
+    let s = null;
+    try { s = storage ? JSON.parse(storage.getItem(ADDR_KEY) || 'null') : null; } catch {}
+    if (!s) return {};
+    if (s.owner !== owner || !s.addr) { forgetAddress(storage); return {}; }
+    return s.addr;
+  }
+
+  const api = { attemptId, pendingFields, clear, ownerOf, hashText, KEY, rememberAddress, savedAddress, forgetAddress, ADDR_KEY };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CheckoutAttempt = api;
 })(this);
