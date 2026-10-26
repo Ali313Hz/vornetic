@@ -1015,10 +1015,11 @@ async function viewSettings() {
       <p class="notice" style="margin-bottom:14px">Kart ile ödeme: ${me.stripe ? '<b style="color:var(--ok)">Açık (Stripe bağlı)</b>' : 'Kapalı — açmak için sunucuyu <code>STRIPE_SECRET_KEY</code> ile başlat (README).'}<br>
       Bizum ve havale: aşağıyı doldurursan ödeme sayfasında görünür. Hiçbiri yoksa müşteri "ödemeyi sonra konuşalım" seçeneğiyle sipariş verir.</p>
       ${f('bizum_phone', 'Bizum telefon numarası')}
-      <div class="grid2">${f('iban', 'IBAN')}${f('iban_holder', 'Hesap sahibi')}</div></div>
+      <div class="grid2">${f('iban', 'IBAN')}${f('iban_holder', 'Hesap sahibi')}</div>
+      ${f('iban_bic', 'SWIFT / BIC (isteğe bağlı)')}</div>
     <div class="box"><h3>Şirket bilgileri (yasal sayfalarda görünür)</h3>
-      <div class="grid2">${f('company_name', 'Ad / şirket adı')}${f('company_nif', 'NIF / NIE')}</div>
-      ${f('company_address', 'Adres')}</div>
+      <div class="grid2">${f('company_name', 'Ticari ad (sitede görünen)')}${f('company_holder', 'Yasal ad soyad (Titular)')}</div>
+      <div class="grid2">${f('company_nif', 'NIF / NIE')}${f('company_address', 'Adres')}</div></div>
     <button class="btn">Kaydet</button>
   </form>`;
   $('#sf').addEventListener('submit', async e => {

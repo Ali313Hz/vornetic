@@ -283,7 +283,7 @@ app.get('/api/config', (req, res) => {
       ib: Number(s.ship_ib_cents), pt: Number(s.ship_pt_cents), free_far: Number(s.free_far_cents),
     },
     payments: availablePayments(s),
-    company: { name: s.company_name, nif: s.company_nif, address: s.company_address },
+    company: { name: s.company_name, holder: s.company_holder, nif: s.company_nif, address: s.company_address },
     countries: countries(s),
     mail: mail.enabled,
   });
@@ -403,17 +403,37 @@ app.get('/api/account/orders', requireUser, (req, res) => {
 });
 
 // ---------- Orders ----------
+// What the customer is told when an order can't be placed, in the language of the checkout
+// (lang = 'es' or 'en'; {name} = the product name in that language)
+const ORDER_MSG = {
+  required: ['Please fill in all required fields', 'Rellena todos los campos obligatorios'],
+  email: ['Invalid email', 'El email no es válido'],
+  empty: ['Your cart is empty', 'Tu carrito está vacío'],
+  method: ['Payment method not available', 'Este método de pago no está disponible'],
+  card_down: ['Card payment is not available right now. Please try again or choose another payment method.',
+    'El pago con tarjeta no está disponible en este momento. Inténtalo de nuevo o elige otro método de pago.'],
+  cart_changed: ['Your cart changed while the payment page was being prepared. Please check it and try again.',
+    'Tu carrito ha cambiado mientras se preparaba la página de pago. Revísalo e inténtalo de nuevo.'],
+  gone: ['A product in your cart is no longer available', 'Un producto de tu carrito ya no está disponible'],
+  out: ['Out of stock: {name}', 'Agotado: {name}'],
+  car: ['Please choose your car for {name}', 'Elige tu coche para {name}'],
+  stock: ['Not enough stock: {name} (only {stock} left, you asked for {qty})', 'No hay stock suficiente: {name} (quedan {stock}, has pedido {qty})'],
+};
+const orderMsg = (lang, key, p, vars = {}) => ORDER_MSG[key][lang === 'es' ? 1 : 0]
+  .replace('{name}', p ? (lang === 'es' ? p.name_es : p.name_en) : '')
+  .replace('{stock}', vars.stock).replace('{qty}', vars.qty);
+
 // Validate a cart line and return a clean copy with the server-side price
-function cleanLine(it) {
+function cleanLine(it, lang) {
   const p = db.prepare("SELECT * FROM products WHERE id = ? AND status = 'available'").get(Number(it.id));
-  if (!p) throw new Error('A product in your cart is no longer available');
-  if (p.stock <= 0) throw new Error(`Out of stock: ${p.name_en}`);
+  if (!p) throw new Error(orderMsg(lang, 'gone'));
+  if (p.stock <= 0) throw new Error(orderMsg(lang, 'out', p));
   const qty = Math.min(10, Math.max(1, parseInt(it.qty, 10) || 1));
   const { unit, labels, labelsEs } = catalog.priceForSelection(p, it.options || {});
   let car = null;
   if (p.fitment === 'car') {
     const c = cleanCar(it.car);
-    if (!c) throw new Error('Please choose your car for ' + p.name_en);
+    if (!c) throw new Error(orderMsg(lang, 'car', p));
     car = carLabel(c);
   }
   return { id: p.id, name: p.name_en, name_es: p.name_es, qty, unit_cents: unit, options: labels, options_es: labelsEs, car };
@@ -690,9 +710,9 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
     const address = str(b.address, 250), city = str(b.city, 100), zip = str(b.zip, 20), province = str(b.province, 100);
     const country = countries(s).includes(b.country) ? b.country : 'ES';
     const lang = b.lang === 'en' ? 'en' : 'es';
-    if (!name || !address || !city || !zip || !phone) throw new Error('Please fill in all required fields');
-    if (!isEmail(email)) throw new Error('Invalid email');
-    if (!Array.isArray(b.items) || !b.items.length || b.items.length > 30) throw new Error('Your cart is empty');
+    if (!name || !address || !city || !zip || !phone) throw new Error(orderMsg(lang, 'required'));
+    if (!isEmail(email)) throw new Error(orderMsg(lang, 'email'));
+    if (!Array.isArray(b.items) || !b.items.length || b.items.length > 30) throw new Error(orderMsg(lang, 'empty'));
     const zone = shipZone(country, zip);
     if (!zone) throw new Error('no_shipping');
 
@@ -714,8 +734,8 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
     // this attempt is opening its Stripe payment page right now (a request still running here)
     if (checkoutId && checkoutsOpening.has(checkoutId)) return res.status(409).json({ error: 'checkout_in_progress' });
 
-    if (!availablePayments(s)[method]) throw new Error('Payment method not available');
-    const items = b.items.map(cleanLine);
+    if (!availablePayments(s)[method]) throw new Error(orderMsg(lang, 'method'));
+    const items = b.items.map(i => cleanLine(i, lang));
     const subtotal = items.reduce((a, i) => a + i.unit_cents * i.qty, 0);
     const shipping = shippingFor(zone, subtotal, s);
     const total = subtotal + shipping;
@@ -732,7 +752,7 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
         session = await stripeCheckout({ ref, email, lang, items, shipping, base: baseUrl(req) });
       } catch (err) {
         console.error(`Stripe checkout failed for ${ref}:`, err.message);
-        throw new Error('Card payment is not available right now. Please try again or choose another payment method.');
+        throw new Error(orderMsg(lang, 'card_down'));
       } finally {
         if (checkoutId) checkoutsOpening.delete(checkoutId);
       }
@@ -745,11 +765,9 @@ app.post('/api/orders', limit(10, 10 * 60 * 1000), async (req, res) => {
         // Card: Stripe was asked first (an await), so the cart is checked again here, in the same
         // transaction that takes the stock: a product removed (or changed) meanwhile means no order —
         // never a payable order for something no longer sold, nor one that differs from the page.
-        if (session && JSON.stringify(b.items.map(cleanLine)) !== JSON.stringify(items))
-          throw new Error('Your cart changed while the payment page was being prepared. Please check it and try again.');
-        takeStock(items, (p, qty) => lang === 'es'
-          ? `No hay stock suficiente: ${p.name_es} (quedan ${p.stock}, has pedido ${qty})`
-          : `Not enough stock: ${p.name_en} (only ${p.stock} left, you asked for ${qty})`);
+        if (session && JSON.stringify(b.items.map(i => cleanLine(i, lang))) !== JSON.stringify(items))
+          throw new Error(orderMsg(lang, 'cart_changed'));
+        takeStock(items, (p, qty) => orderMsg(lang, 'stock', p, { stock: p.stock, qty }));
         return db.prepare(`INSERT INTO orders
           (ref, user_id, customer_name, email, phone, address, city, zip, province, country, notes, items,
            subtotal_cents, shipping_cents, total_cents, payment_method, lang, checkout_id, checkout_hash, stripe_session, stripe_url)
@@ -834,7 +852,7 @@ function availablePayments(s) {
 }
 function paymentInfo(s, method) {
   if (method === 'bizum') return { bizum_phone: s.bizum_phone };
-  if (method === 'transfer') return { iban: s.iban, iban_holder: s.iban_holder };
+  if (method === 'transfer') return { iban: s.iban, iban_holder: s.iban_holder, iban_bic: s.iban_bic };
   return {};
 }
 
@@ -942,8 +960,9 @@ function stripeCheckout({ ref, email, lang, items, shipping, base }) {
     expires_at: Math.floor(Date.now() / 1000) + CARD_SESSION_MINUTES * 60,
   };
   const lines = items.map(i => ({
-    name: i.name + (i.car ? ` — ${i.car}` : ''),
-    desc: i.options.join(' · '),
+    // the names the customer saw, in the language of the checkout
+    name: (lang === 'es' ? i.name_es || i.name : i.name) + (i.car ? ` — ${i.car}` : ''),
+    desc: (lang === 'es' ? i.options_es || i.options : i.options).join(' · '),
     amount: i.unit_cents, qty: i.qty,
   }));
   if (shipping) lines.push({ name: lang === 'es' ? 'Envío' : 'Shipping', amount: shipping, qty: 1 });
