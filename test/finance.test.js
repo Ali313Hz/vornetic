@@ -619,8 +619,8 @@ test('a "?" inside a word (letters lost by Excel) gets a warning', () => {
 
 test('the admin page offers the Excel download and shows buyer and reference in the import preview', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'admin.js'), 'utf8');
-  assert.match(src, /href="\/api\/admin\/finance\/export\.xlsx\?month=\$\{d\.month\}" download>Excel indir \(bu ay\)/);
-  assert.match(src, /<th>Kişi \/ firma<\/th><th>Ref<\/th>/);
+  assert.match(src, /href="\/api\/admin\/finance\/export\.xlsx\?month=\$\{d\.month\}" download>\$\{L\('Excel indir \(bu ay\)', 'Descargar Excel \(este mes\)'\)\}/);
+  assert.match(src, /<th>\$\{L\('Kişi \/ firma', 'Persona \/ empresa'\)\}<\/th><th>Ref<\/th>/);
   assert.match(src, /<td>\$\{esc\(x\.party\)\}<\/td><td>\$\{esc\(x\.reference\)\}<\/td>/);
 });
 

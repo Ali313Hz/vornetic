@@ -223,10 +223,10 @@ function oldDatabase(dir, orders) {
 const daysAgo = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 19).replace('T', ' ');
 
 // The admin page helpers (browser code) loaded straight from public/js/admin.js
-function adminHelpers() {
+function adminHelpers(lang = 'tr') {
   const src = fs.readFileSync(path.join(ROOT, 'public', 'js', 'admin.js'), 'utf8');
   const grab = re => { const m = src.match(re); assert.ok(m, 'not found in admin.js: ' + re); return m[0]; };
-  const code = [grab(/^const eur = .*$/m), grab(/^function parseEuro[\s\S]*?^\}\r?$/m), grab(/^function refundWarning[\s\S]*?^\}\r?$/m)];
+  const code = [`const LANG = ${JSON.stringify(lang)};`, grab(/^const L = .*$/m), grab(/^const eur = .*$/m), grab(/^function parseEuro[\s\S]*?^\}\r?$/m), grab(/^function refundWarning[\s\S]*?^\}\r?$/m)];
   return new Function(code.join('\n') + '\nreturn { eur, parseEuro, refundWarning };')();
 }
 
@@ -569,6 +569,7 @@ test('a partly refunded cancelled order shows the remaining amount, not "no refu
     o = await srv.orderByRef(ref);
     assert.deepStrictEqual([o.needs_refund, o.refund_due_cents], [1, o.total_cents - 500]);
     assert.strictEqual(refundWarning(o), `⚠ İade eksik: ${eur(o.total_cents - 500)} kaldı (${eur(500)} iade edildi)`);
+    assert.strictEqual(adminHelpers('es').refundWarning(o), `⚠ Devolución incompleta: faltan ${eur(o.total_cents - 500)} (devuelto ${eur(500)})`);
 
     await srv.refund(ref, o.total_cents - 500);
     o = await srv.orderByRef(ref);
