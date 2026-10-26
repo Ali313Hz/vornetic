@@ -349,3 +349,39 @@ select.in:disabled { background-color: var(--soft); color: var(--muted); }
   .hero-in { padding-top: 28px; padding-bottom: 24px; }
   h1 { letter-spacing: -.02em; }
 }
+
+/* ---------- Reviews (verified buyers) ---------- */
+.stars { position: relative; display: inline-block; color: var(--line-2); letter-spacing: 1px; line-height: 1; white-space: nowrap; }
+.stars-on { position: absolute; left: 0; top: 0; overflow: hidden; color: #b7791f; }
+.rv-sum { display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 0; margin: 0 0 8px; cursor: pointer; font-size: 14px; color: var(--muted); }
+.rv-sum:hover span:last-child { text-decoration: underline; }
+.rv-sum[hidden] { display: none; }
+.reviews { border-top: 1px solid var(--line); padding: 32px 0 48px; }
+.rv-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.rv-head h2 { margin: 0; }
+.rv-avg { display: flex; align-items: center; gap: 6px; }
+.rv-note { margin: 8px 0 20px; max-width: 760px; }
+.rv-grid { display: grid; grid-template-columns: 1fr 380px; gap: 32px; align-items: start; }
+@media (max-width: 860px) { .rv-grid { grid-template-columns: 1fr; gap: 20px; } .rv-side { order: -1; } }
+.rv { border-bottom: 1px solid var(--line); padding: 16px 0; }
+.rv:first-child { padding-top: 0; }
+.rv-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rv-badge { font-size: 12px; font-weight: 600; color: var(--ok); background: #eaf5ee; border-radius: 999px; padding: 2px 8px; }
+.rv-text { margin: 8px 0 0; white-space: pre-line; overflow-wrap: anywhere; }
+.rv-photo { width: 120px; height: 120px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); margin-top: 10px; background: #fff; }
+.rv-reply { margin-top: 12px; background: var(--soft); border-left: 3px solid var(--ink); border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.rv-reply p { margin: 4px 0 0; white-space: pre-line; overflow-wrap: anywhere; }
+.rv-form h3 { margin-bottom: 10px; }
+.rv-rate { border: 0; padding: 0; margin: 0 0 14px; display: flex; gap: 4px; }
+.rv-rate legend { color: var(--muted); font-size: 14px; font-weight: 500; margin-bottom: 6px; padding: 0; }
+.rv-rate label { cursor: pointer; font-size: 30px; line-height: 1; color: var(--line-2); min-width: 44px; min-height: 44px; display: grid; place-items: center; position: relative; }
+.rv-rate input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.rv-rate:has(input:checked) label { color: #b7791f; }
+.rv-rate label:has(input:checked) ~ label { color: var(--line-2); }
+.rv-rate:hover label { color: #b7791f !important; }
+.rv-rate label:hover ~ label { color: var(--line-2) !important; }
+.rv-rate label:has(input:focus-visible) { outline: 2px solid var(--ink); border-radius: 8px; }
+.rv-cur { display: flex; align-items: center; gap: 12px; margin: -4px 0 14px; }
+.rv-cur img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+.rv-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

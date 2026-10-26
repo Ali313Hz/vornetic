@@ -112,6 +112,37 @@ CREATE TABLE IF NOT EXISTS password_resets (
   user_id INTEGER NOT NULL,
   expires_at TEXT NOT NULL
 );
+
+-- Product reviews. Only written by a customer whose account has a shipped or delivered order with
+-- that product (order_id is that order); one per product and customer, which they can edit.
+-- The shop can reply or hide one (abusive / illegal content), never write or change one.
+CREATE TABLE IF NOT EXISTS reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  order_id INTEGER NOT NULL,
+  rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  text TEXT DEFAULT '',
+  photo TEXT DEFAULT '',
+  status TEXT DEFAULT 'visible',      -- visible | hidden
+  reply TEXT DEFAULT '',
+  reply_at TEXT,
+  lang TEXT DEFAULT 'es',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE (product_id, user_id)
+);
+
+-- The shop's decision on a customer's review of a product (visible | hidden), kept apart from the
+-- review so it survives when the customer deletes the review: a hidden review sent again stays
+-- hidden until the shop shows it. Holds no review content (no text, rating or photo).
+CREATE TABLE IF NOT EXISTS review_moderation (
+  product_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  decided_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (product_id, user_id)
+);
 `);
 
 // Columns added after the first version (safe to run on every start)
@@ -180,6 +211,9 @@ if (!db.prepare("SELECT 1 FROM pragma_table_info('orders') WHERE name = 'paid_at
     UPDATE orders SET payment_unknown = 1 WHERE status = 'cancelled';
     COMMIT;`);
 }
+
+// Reviews hidden before review_moderation existed: keep that decision too (an existing row wins)
+db.exec("INSERT OR IGNORE INTO review_moderation (product_id, user_id, status) SELECT product_id, user_id, status FROM reviews WHERE status = 'hidden'");
 
 // Refunds: one row per refund actually made, with its date. Rows are only ever added, so the
 // history shows when and how much was given back (also several partial refunds).

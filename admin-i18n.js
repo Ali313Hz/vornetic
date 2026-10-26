@@ -50,6 +50,9 @@ const MESSAGES = [
   ['Ödenmemiş siparişte iade olamaz', null, 'No se puede devolver un pedido no pagado'],
   [/^İade, kalan tutarı aşamaz \(en fazla (.+) €\)$/, null, 'La devolución no puede superar lo que queda (máximo $1 €)'],
   ['En az 8 karakter', null, 'Mínimo 8 caracteres'],
+  // reviews
+  ['Geçersiz durum', null, 'Estado no válido'],
+  ['Cevap en fazla 1000 karakter', null, 'La respuesta puede tener como máximo 1000 caracteres'],
   // finance
   ['Tür "income" ya da "expense" olmalı', null, 'El tipo debe ser "income" o "expense"'],
   ['Geçerli bir tarih gir (YYYY-AA-GG)', null, 'Escribe una fecha válida (AAAA-MM-DD)'],

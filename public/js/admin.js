@@ -57,8 +57,8 @@ const STATUS = () => L({ pending: 'Ödeme bekliyor', paid: 'Ödendi — gönderi
   { pending: 'Pendiente de pago', paid: 'Pagado — por enviar', shipped: 'Enviado', delivered: 'Entregado', cancelled: 'Cancelado' });
 const PAY = () => L({ card: 'Kart (Stripe)', bizum: 'Bizum', transfer: 'Havale', contact: 'İletişimle ödeme' },
   { card: 'Tarjeta (Stripe)', bizum: 'Bizum', transfer: 'Transferencia', contact: 'Pago acordado por contacto' });
-const TABS = () => L({ orders: 'Siparişler', customers: 'Müşteriler', withdrawals: 'Cayma', products: 'Ürünler', categories: 'Kategoriler', bulbs: 'Ampuller', finance: 'Finans', stats: 'Özet', settings: 'Ayarlar' },
-  { orders: 'Pedidos', customers: 'Clientes', withdrawals: 'Desistimientos', products: 'Productos', categories: 'Categorías', bulbs: 'Bombillas', finance: 'Finanzas', stats: 'Resumen', settings: 'Ajustes' });
+const TABS = () => L({ orders: 'Siparişler', customers: 'Müşteriler', withdrawals: 'Cayma', reviews: 'Yorumlar', products: 'Ürünler', categories: 'Kategoriler', bulbs: 'Ampuller', finance: 'Finans', stats: 'Özet', settings: 'Ayarlar' },
+  { orders: 'Pedidos', customers: 'Clientes', withdrawals: 'Desistimientos', reviews: 'Opiniones', products: 'Productos', categories: 'Categorías', bulbs: 'Bombillas', finance: 'Finanzas', stats: 'Resumen', settings: 'Ajustes' });
 let ME = {};
 let tab = 'orders';
 
@@ -107,7 +107,7 @@ $('#logout').addEventListener('click', async () => { await send('/api/admin/logo
 function show() {
   root.innerHTML = `<p class="muted">${L('Yükleniyor…', 'Cargando…')}</p>`;
   window.scrollTo(0, 0);
-  ({ orders: viewOrders, customers: viewCustomers, withdrawals: viewWithdrawals, products: viewProducts, categories: viewCategories, bulbs: viewBulbs, finance: viewFinance, stats: viewStats, settings: viewSettings })[tab]().catch(e => {
+  ({ orders: viewOrders, customers: viewCustomers, withdrawals: viewWithdrawals, reviews: viewReviews, products: viewProducts, categories: viewCategories, bulbs: viewBulbs, finance: viewFinance, stats: viewStats, settings: viewSettings })[tab]().catch(e => {
     root.innerHTML = `<p class="notice err">${esc(e.message)}</p>`;
   });
 }
@@ -364,6 +364,53 @@ async function viewWithdrawals() {
     await send('/api/admin/withdrawals/' + el.dataset.id, { handled });
     await refreshMe(); show();
   }));
+}
+
+/* ---------- Yorumlar (sadece kargolanmış siparişi olan müşteriler) ---------- */
+let reviewFilter = '';
+async function viewReviews() {
+  const list = await api('/api/admin/reviews' + (reviewFilter ? '?status=' + reviewFilter : ''));
+  const stars = n => '★'.repeat(n) + '☆'.repeat(5 - n);
+  root.innerHTML = `
+    <div class="section-head"><h2>${L('Müşteri yorumları', 'Opiniones de clientes')}</h2>
+      <select class="in" id="rvF" style="width:auto">
+        <option value="">${L('Hepsi', 'Todas')}</option>
+        <option value="visible" ${reviewFilter === 'visible' ? 'selected' : ''}>${L('Yayında', 'Publicadas')}</option>
+        <option value="hidden" ${reviewFilter === 'hidden' ? 'selected' : ''}>${L('Gizli', 'Ocultas')}</option>
+      </select></div>
+    <p class="notice" style="margin-bottom:16px">${L(`Yorumu sadece hesabındaki siparişi kargolanmış/teslim edilmiş müşteri yazabilir ("Compra verificada"). Yorumları sen yazamaz ve değiştiremezsin; sadece cevap verebilir veya gizleyebilirsin.
+    Sadece hakaret, kişisel bilgi, reklam veya yasa dışı içerik varsa gizle. Olumsuz bir yorumu sırf olumsuz olduğu için gizleme: AB tüketici kurallarına göre yanıltıcı sayılır. Bunun yerine kibarca cevap yaz.`,
+    `Solo puede opinar el cliente cuyo pedido de su cuenta se ha enviado o entregado ("Compra verificada"). No puedes escribir ni cambiar opiniones; solo responder u ocultarlas.
+    Oculta solo si hay insultos, datos personales, publicidad o contenido ilegal. No ocultes una opinión negativa por ser negativa: según las normas de consumo de la UE es engañoso. Mejor responde con educación.`)}</p>
+    ${list.length ? list.map(r => `<div class="order" data-id="${r.id}" style="${r.status === 'hidden' ? 'opacity:.6' : ''}">
+      <div class="order-head"><div><b style="color:#b7791f">${stars(r.rating)}</b> · <b>${esc(r.product_name || L('(silinmiş ürün)', '(producto borrado)'))}</b>
+        · <span class="muted">${esc(day(r.created_at))}${r.updated_at !== r.created_at ? ' · ' + L('düzenlendi', 'editada') : ''}</span></div>
+        <span class="status ${r.status === 'hidden' ? 'cancelled' : 'delivered'}">${r.status === 'hidden' ? L('Gizli', 'Oculta') : L('Yayında', 'Publicada')}</span></div>
+      <div class="small muted">${esc(r.user_name)} · <a class="link" href="mailto:${esc(r.user_email)}">${esc(r.user_email)}</a>${r.order_ref ? ` · ${L('Sipariş', 'Pedido')} ${esc(r.order_ref)}` : ''} · ${r.lang === 'en' ? 'EN' : 'ES'}</div>
+      ${r.text ? `<p style="white-space:pre-line;margin:10px 0 0">${esc(r.text)}</p>` : `<p class="muted small" style="margin:10px 0 0">${L('(sadece yıldız)', '(solo estrellas)')}</p>`}
+      ${r.photo ? `<a href="${esc(r.photo)}" target="_blank" rel="noopener"><img src="${esc(r.photo)}" alt="" style="width:96px;height:96px;object-fit:cover;border-radius:8px;border:1px solid var(--line);margin-top:10px"></a>` : ''}
+      <label class="f" style="margin-top:12px"><span>${L('Mağaza cevabı (herkese görünür, boş bırakırsan cevap silinir)', 'Respuesta de la tienda (pública; si la dejas vacía se borra)')}</span>
+        <textarea class="in rp" maxlength="1000" rows="2">${esc(r.reply || '')}</textarea></label>
+      <div class="order-actions">
+        <button class="btn sm sv">${L('Cevabı kaydet', 'Guardar respuesta')}</button>
+        <button class="btn ghost sm hd" style="margin-left:auto">${r.status === 'hidden' ? L('Tekrar yayınla', 'Volver a publicar') : L('Gizle', 'Ocultar')}</button>
+        ${r.product_slug ? `<a class="link small" href="/p/${esc(r.product_slug)}" target="_blank">${L('Ürün sayfası', 'Ver producto')} ↗</a>` : ''}
+      </div></div>`).join('') : `<p class="muted">${L('Henüz yorum yok.', 'Todavía no hay opiniones.')}</p>`}`;
+  $('#rvF').addEventListener('change', e => { reviewFilter = e.target.value; show(); });
+  $$('.order[data-id]').forEach(el => {
+    const id = el.dataset.id;
+    $('.sv', el).addEventListener('click', async () => {
+      try { await send('/api/admin/reviews/' + id, { reply: $('.rp', el).value }); toast(L('Kaydedildi', 'Guardado')); show(); }
+      catch (e) { toast(e.message); }
+    });
+    $('.hd', el).addEventListener('click', async () => {
+      const hide = el.style.opacity === '';
+      if (hide && !confirm(L('Bu yorumu gizle? Sadece hakaret, kişisel bilgi, reklam veya yasa dışı içerik için gizle.',
+        '¿Ocultar esta opinión? Hazlo solo si hay insultos, datos personales, publicidad o contenido ilegal.'))) return;
+      try { await send('/api/admin/reviews/' + id, { status: hide ? 'hidden' : 'visible' }); show(); }
+      catch (e) { toast(e.message); }
+    });
+  });
 }
 
 /* ---------- Ampul listesi (arabaya göre) ---------- */

@@ -76,6 +76,20 @@ const T = {
     withdraw_confirm: 'Confirm withdrawal', withdraw_done: 'We have received your withdrawal',
     withdraw_done_s: 'Order {ref} · received on {when}. We will contact you with the return instructions.',
     withdraw_note: 'Made-to-measure EVO mats cannot be returned unless they are faulty or do not match the car you ordered.',
+    rv_title: 'Customer reviews', rv_none: 'No reviews yet.', rv_one: '1 review', rv_many: '{n} reviews',
+    rv_verified: 'Verified purchase', rv_stars: '{n} out of 5 stars',
+    rv_note: 'All reviews come from customers who bought this product in our shop and whose order has been shipped. We publish positive and negative reviews alike; we only hide insulting or illegal content.',
+    rv_write: 'Write a review', rv_edit: 'Edit your review', rv_login: 'Bought this product? Log in to review it.',
+    rv_only_buyers: 'You can review this product once an order of your account with it has been shipped. Orders made without an account do not count.',
+    rv_rating: 'Your rating', rv_text: 'Your review (optional)', rv_photo: 'Photo (optional, JPG, PNG or WEBP)', rv_photo_remove: 'Remove photo',
+    rv_public_name: 'Your first name and the initial of your last name are shown with your review.',
+    rv_send: 'Publish review', rv_saved: 'Thank you! Your review is published.', rv_delete: 'Delete my review', rv_delete_q: 'Delete your review?',
+    rv_hidden: 'The shop has hidden your review because it breaks the rules (insults or illegal content). You can edit it.',
+    rv_reply: 'Reply from Vornetic', rv_edited: 'edited',
+    err_review_rating: 'Choose from 1 to 5 stars.', err_review_text_long: 'The review can have at most 2000 characters.',
+    err_review_photo_type: 'The photo must be JPG, PNG or WEBP.', err_review_photo_big: 'The photo is too large (max. 5 MB).',
+    err_review_not_buyer: 'You can review this product once an order of your account with it has been shipped.',
+    err_review_bad: 'The review could not be sent. Please try again.',
     safety_title: 'Product safety information', manufacturer: 'Manufacturer', eu_resp: 'Responsible person in the EU', distributor: 'Seller',
     forgot_link: 'Forgot your password?', forgot_title: 'Reset your password',
     forgot_intro: 'Enter your email and we will send you a link to choose a new password.', send_link: 'Send link',
@@ -162,6 +176,20 @@ const T = {
     withdraw_confirm: 'Confirmar desistimiento', withdraw_done: 'Hemos recibido tu desistimiento',
     withdraw_done_s: 'Pedido {ref} · recibido el {when}. Te contactaremos con las instrucciones de devolución.',
     withdraw_note: 'Las alfombrillas EVO a medida no admiten devolución salvo que tengan un defecto o no correspondan al coche que pediste.',
+    rv_title: 'Opiniones de clientes', rv_none: 'Todavía no hay opiniones.', rv_one: '1 opinión', rv_many: '{n} opiniones',
+    rv_verified: 'Compra verificada', rv_stars: '{n} de 5 estrellas',
+    rv_note: 'Todas las opiniones son de clientes que han comprado este producto en nuestra tienda y cuyo pedido ya se ha enviado. Publicamos las opiniones positivas y negativas; solo ocultamos contenido ofensivo o ilegal.',
+    rv_write: 'Escribir una opinión', rv_edit: 'Editar tu opinión', rv_login: '¿Has comprado este producto? Inicia sesión para opinar.',
+    rv_only_buyers: 'Podrás opinar sobre este producto cuando se haya enviado un pedido de tu cuenta que lo incluya. Los pedidos hechos sin cuenta no cuentan.',
+    rv_rating: 'Tu valoración', rv_text: 'Tu opinión (opcional)', rv_photo: 'Foto (opcional, JPG, PNG o WEBP)', rv_photo_remove: 'Quitar foto',
+    rv_public_name: 'Junto a tu opinión se muestra tu nombre y la inicial de tu apellido.',
+    rv_send: 'Publicar opinión', rv_saved: '¡Gracias! Tu opinión está publicada.', rv_delete: 'Eliminar mi opinión', rv_delete_q: '¿Eliminar tu opinión?',
+    rv_hidden: 'La tienda ha ocultado tu opinión porque no cumple las normas (insultos o contenido ilegal). Puedes editarla.',
+    rv_reply: 'Respuesta de Vornetic', rv_edited: 'editada',
+    err_review_rating: 'Elige de 1 a 5 estrellas.', err_review_text_long: 'La opinión puede tener como máximo 2000 caracteres.',
+    err_review_photo_type: 'La foto debe ser JPG, PNG o WEBP.', err_review_photo_big: 'La foto es demasiado grande (máx. 5 MB).',
+    err_review_not_buyer: 'Podrás opinar sobre este producto cuando se haya enviado un pedido de tu cuenta que lo incluya.',
+    err_review_bad: 'No se ha podido enviar la opinión. Inténtalo de nuevo.',
     safety_title: 'Información de seguridad del producto', manufacturer: 'Fabricante', eu_resp: 'Responsable en la UE', distributor: 'Vendedor',
     forgot_link: '¿Has olvidado tu contraseña?', forgot_title: 'Recuperar contraseña',
     forgot_intro: 'Escribe tu email y te enviaremos un enlace para elegir una nueva contraseña.', send_link: 'Enviar enlace',
@@ -735,6 +763,7 @@ async function viewProduct(slug) {
       <div class="pinfo">
         <span class="muted small">${esc(p.fitment === 'car' ? t('fits_car') : L(cat?.name))}</span>
         <h1 class="ptitle">${esc(L(p.name))}</h1>
+        <button type="button" class="rv-sum" id="rvSum" hidden></button>
         <div class="price" id="price"></div>
         ${soon ? `<div class="notice soon-note">${esc(t('soon_note'))}${CONFIG.whatsapp ? ` <a class="link" href="${waLink(`${t('notify_msg')}: ${L(p.name)}`)}" target="_blank" rel="noopener">${esc(t('notify_wa'))}</a>` : ''}</div>` : ''}
         ${p.fitment === 'car' ? `<div class="carbox"><h3>${ICON.car} ${esc(t('finder_title'))}</h3><div class="car-row" id="pCar"></div>
@@ -760,9 +789,11 @@ async function viewProduct(slug) {
         </details>
       </div>
     </div>
+    <section class="reviews" id="reviews" aria-labelledby="rvTitle"></section>
   </div>`;
 
   const gallery = mountGallery($('#gallery'), L(p.name));
+  mountReviews(p, id);
 
   // Preselect: options with one value, and ?o=H7 from the bulb finder
   p.options.forEach(o => { if (o.values.length === 1 && !o.values[0].soon) sel[o.id] = o.values[0].id; });
@@ -816,6 +847,97 @@ async function viewProduct(slug) {
     if (unitPrice(p, sel) == null) return err(t('not_available'));
     cart.add(p, qty, { ...sel }, car);
     toast(`${esc(t('added'))} <a href="/cart" data-link>${esc(t('view_cart'))} →</a>`);
+  });
+}
+
+/* ================= reviews (verified buyers only, see server.js) ================= */
+// Filled stars as wide as the rating (4.5 → four and a half), with the number for screen readers
+const starsHtml = n => `<span class="stars" role="img" aria-label="${esc(t('rv_stars').replace('{n}', String(n).replace('.', LANG === 'es' ? ',' : '.')))}">
+  <span class="stars-on" style="width:${Math.max(0, Math.min(5, n)) * 20}%">★★★★★</span>★★★★★</span>`;
+const rvCount = n => n === 1 ? t('rv_one') : t('rv_many').replace('{n}', n);
+// Big phone photos are made smaller in the browser before sending (longest side 1600 px, JPEG)
+async function shrinkPhoto(file) {
+  if (!file || !/^image\/(jpeg|png|webp)$/.test(file.type)) return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    if (scale === 1 && file.size < 1.5 * 1024 * 1024) return file;
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
+    return blob ? new File([blob], 'photo.jpg', { type: 'image/jpeg' }) : file;
+  } catch { return file; }
+}
+
+async function mountReviews(p, renderedId) {
+  const box = $('#reviews');
+  const url = `/api/products/${encodeURIComponent(p.slug)}/reviews`;
+  let data;
+  try { data = await api(url); } catch { return; }
+  if (stale(renderedId)) return;
+  const sum = $('#rvSum');
+  sum.hidden = !data.count;
+  if (data.count) {
+    sum.innerHTML = `${starsHtml(data.avg)} <span>${esc(String(data.avg).replace('.', LANG === 'es' ? ',' : '.'))} · ${esc(rvCount(data.count))}</span>`;
+    sum.onclick = () => box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  const me = data.me, mine = me?.mine;
+  const formHtml = () => `<form class="box rv-form" id="rvForm" novalidate>
+    <h3>${esc(mine ? t('rv_edit') : t('rv_write'))}</h3>
+    ${mine?.status === 'hidden' ? `<p class="notice err">${esc(t('rv_hidden'))}</p>` : ''}
+    <fieldset class="rv-rate"><legend>${esc(t('rv_rating'))}</legend>
+      ${[1, 2, 3, 4, 5].map(n => `<label><input type="radio" name="rating" value="${n}" ${mine?.rating === n ? 'checked' : ''}><span aria-hidden="true">★</span><span class="sr">${esc(t('rv_stars').replace('{n}', n))}</span></label>`).join('')}
+    </fieldset>
+    <label class="f"><span>${esc(t('rv_text'))}</span><textarea class="in" name="text" maxlength="2000" rows="4">${esc(mine?.text || '')}</textarea></label>
+    <label class="f"><span>${esc(t('rv_photo'))}</span><input class="in" type="file" name="photo" accept="image/jpeg,image/png,image/webp"></label>
+    ${mine?.photo ? `<div class="rv-cur"><img src="${esc(mine.photo)}" alt=""><label class="small"><input type="checkbox" name="remove_photo" value="1"> ${esc(t('rv_photo_remove'))}</label></div>` : ''}
+    <p class="muted small">${esc(t('rv_public_name'))}</p>
+    <div id="rvErr"></div>
+    <div class="rv-actions"><button class="btn" id="rvSend">${esc(t('rv_send'))}</button>
+      ${mine ? `<button type="button" class="btn ghost sm" id="rvDel">${esc(t('rv_delete'))}</button>` : ''}</div>
+  </form>`;
+  const who = !me ? `<p class="notice">${esc(t('rv_login'))} <a class="link" href="/account?next=${encodeURIComponent('/p/' + p.slug)}" data-link>${esc(t('login'))}</a></p>`
+    : me.can_review ? formHtml() : `<p class="notice">${esc(t('rv_only_buyers'))}</p>`;
+  box.innerHTML = `<div class="rv-head"><h2 id="rvTitle">${esc(t('rv_title'))}</h2>
+      ${data.count ? `<div class="rv-avg">${starsHtml(data.avg)} <b>${esc(String(data.avg).replace('.', LANG === 'es' ? ',' : '.'))}</b> <span class="muted">· ${esc(rvCount(data.count))}</span></div>` : ''}</div>
+    <p class="muted small rv-note">${esc(t('rv_note'))}</p>
+    <div class="rv-grid"><div class="rv-list">${data.reviews.length ? data.reviews.map(r => `<article class="rv">
+        <div class="rv-top">${starsHtml(r.rating)} <b>${esc(r.name)}</b> <span class="rv-badge">✓ ${esc(t('rv_verified'))}</span></div>
+        <div class="muted small">${esc(date(r.created_at))}${r.edited ? ` · ${esc(t('rv_edited'))}` : ''}</div>
+        ${r.text ? `<p class="rv-text">${esc(r.text)}</p>` : ''}
+        ${r.photo ? `<a href="${esc(r.photo)}" target="_blank" rel="noopener"><img class="rv-photo" src="${esc(r.photo)}" alt="" loading="lazy"></a>` : ''}
+        ${r.reply ? `<div class="rv-reply"><b>${esc(t('rv_reply'))}</b><p>${esc(r.reply)}</p></div>` : ''}
+      </article>`).join('') : `<p class="muted">${esc(t('rv_none'))}</p>`}</div>
+      <div class="rv-side">${who}</div></div>`;
+
+  const form = $('#rvForm');
+  if (!form) return;
+  const err = m => { $('#rvErr').innerHTML = `<p class="notice err">${esc(m)}</p>`; };
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const rating = form.rating.value;
+    if (!rating) return err(t('err_review_rating'));
+    const fd = new FormData();
+    fd.append('rating', rating);
+    fd.append('text', form.text.value);
+    fd.append('lang', LANG);
+    if (form.remove_photo?.checked) fd.append('remove_photo', '1');
+    const file = form.photo.files[0];
+    const btn = $('#rvSend'); btn.disabled = true;
+    try {
+      if (file) fd.append('photo', await shrinkPhoto(file));
+      const r = await fetch(`/api/products/${encodeURIComponent(p.slug)}/review`, { method: 'POST', body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errText(d.error || 'review_bad'));
+      toast(esc(t('rv_saved')));
+      mountReviews(p, renderedId);
+    } catch (e2) { err(e2.message); btn.disabled = false; }
+  });
+  $('#rvDel')?.addEventListener('click', async () => {
+    if (!confirm(t('rv_delete_q'))) return;
+    try { await api(`/api/products/${encodeURIComponent(p.slug)}/review`, { method: 'DELETE' }); mountReviews(p, renderedId); }
+    catch (e2) { err(e2.message); }
   });
 }
 
