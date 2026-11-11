@@ -80,30 +80,42 @@ test('a value is never both "coming soon" and "out of stock"; out of stock wins'
   assert.deepStrictEqual([o.values[0].soon, o.values[0].out], [false, true]);
 });
 
-test('made-to-measure (car) products need a real car from the list, checked by the server', async () => {
+test('made-to-measure (car) products need the vehicle typed by the customer (brand, model, year), checked by the server', async () => {
   const srv = await setup();
   try {
     const p = await srv.product({ fitment: 'car' });
-    const cars = (await srv.call('GET', '/api/cars')).body;
-    const brand = Object.keys(cars)[0], model = Object.keys(cars[brand])[0], g = cars[brand][model][0];
-    const car = { brand, model, gen: g.gen, year: g.from };
+    const car = { brand: 'Seat', model: 'León', year: 2019 };
     const buy = c => srv.buy([{ id: p.id, qty: 1, car: c }]);
-    const msg = 'Elige tu coche para Artículo test';
+    const msg = 'Escribe la marca, el modelo y el año de tu vehículo para Artículo test';
+    const thisYear = new Date().getFullYear();
     for (const [why, c] of [
-      ['no car', undefined],
-      ['unknown brand', { ...car, brand: 'Notabrand' }],
-      ['unknown model', { ...car, model: 'Nomodel' }],
-      ['unknown generation', { ...car, gen: 'X99' }],
-      ['year before the generation', { ...car, year: g.from - 1 }],
-      ['year after the generation', { ...car, year: g.to + 1 }],
-      ['engine not in the list', g.engines.length ? { ...car, engine: 'Not an engine' } : { ...car, year: 'abc' }],
+      ['no vehicle', undefined],
+      ['not an object', 'Seat León 2019'],
+      ['no brand', { ...car, brand: '' }],
+      ['blank brand', { ...car, brand: '   ' }],
+      ['no model', { ...car, model: undefined }],
+      ['no year', { ...car, year: '' }],
+      ['year with letters', { ...car, year: '20l9' }],
+      ['year with 2 digits', { ...car, year: '19' }],
+      ['year with 5 digits', { ...car, year: 20190 }],
+      ['year before 1950', { ...car, year: 1949 }],
+      ['year too far ahead', { ...car, year: thisYear + 2 }],
+      ['brand too long', { ...car, brand: 'x'.repeat(41) }],
+      ['model too long', { ...car, model: 'x'.repeat(61) }],
+      ['brand without a letter or number', { ...car, brand: '---' }],
     ]) {
       const r = await buy(c);
       assert.deepStrictEqual([r.status, r.body.error], [400, msg], why);
     }
-    assert.strictEqual(await srv.stock(p.id), 5);
-    const ok = await buy(car);
-    assert.strictEqual(ok.status, 200, JSON.stringify(ok.body));
-    assert.strictEqual((await srv.lines(ok.body.ref))[0].car, `${brand} ${model} ${g.gen} · ${g.from}`);
+    assert.strictEqual(await srv.stock(p.id), 5, 'nothing taken from stock');
+
+    // any real vehicle can be typed (it does not have to be in the shop's car list); the order keeps it as one clean line
+    const typed = await buy({ brand: '  Seat\n', model: '  León   FR  <b>1.5</b>', year: String(thisYear + 1) });
+    assert.strictEqual(typed.status, 200, JSON.stringify(typed.body));
+    assert.strictEqual((await srv.lines(typed.body.ref))[0].car, `Seat León FR b 1.5 /b · ${thisYear + 1}`);
+    const old = await buy({ brand: 'Seat', model: 'León', gen: 'KL', engine: 'whatever', year: 1950 });
+    assert.strictEqual(old.status, 200, 'an older cart with a generation is still accepted; the extra fields are dropped');
+    assert.strictEqual((await srv.lines(old.body.ref))[0].car, 'Seat León · 1950');
+    assert.strictEqual(await srv.stock(p.id), 3);
   } finally { await srv.stop(); }
 });

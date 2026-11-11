@@ -213,6 +213,24 @@ select.in:disabled { background-color: var(--soft); color: var(--muted); }
 .desc { color: #3a3a3c; white-space: pre-line; border-top: 1px solid var(--line); padding-top: 18px; margin-top: 8px; }
 /* an option with one value is not a choice: its name and value are shown, without a button */
 .opt-group.one .opts { display: none; }
+/* 3D picture of the chosen type of vehicle (made-to-measure mats) */
+.v3d { background: var(--soft); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.v3d-canvas { display: block; width: 100%; aspect-ratio: 25 / 16; cursor: grab; touch-action: pan-y; }
+.v3d-canvas:active { cursor: grabbing; }
+.v3d-canvas:focus-visible { outline: 2px solid var(--ink); outline-offset: -4px; }
+.v3d-bar { display: flex; align-items: center; gap: 8px; padding: 0 12px 10px; }
+.v3d-bar button { min-height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface); font-size: 13px; font-weight: 600; cursor: pointer; }
+.v3d-bar button.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.v3d-hint { margin-left: auto; font-size: 13px; color: var(--muted); }
+.v3d-note { margin: 0; padding: 10px 12px 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+#photos:not(:empty) { margin-top: 14px; }
+.v3d-m { display: none; }
+/* on a phone the picture sits above the options, not above the title: choosing and seeing are on the same screen */
+@media (max-width: 860px) {
+  .pdp.mtm #viewer { display: none; }
+  .pdp.mtm .v3d-m { display: block; margin-bottom: 18px; }
+  .pdp.mtm .gallery:not(:has(#photos > *)) { display: none; }
+}
 .opt-group.one { margin-bottom: 10px; }
 /* Description / Prices tabs of a product */
 .see-prices { margin: -12px 0 16px; font-size: 14px; }
@@ -239,6 +257,9 @@ select.in:disabled { background-color: var(--soft); color: var(--muted); }
 .carbox { padding: 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--soft); margin-bottom: 18px; }
 .carbox .car-row { grid-template-columns: 1fr 1fr; }
 @media (max-width: 460px) { .carbox .car-row { grid-template-columns: 1fr; } }
+.veh-row { display: grid; grid-template-columns: 1fr 1fr 96px; gap: 0 10px; }
+.veh-row label.f { margin-bottom: 0; }
+@media (max-width: 460px) { .veh-row { grid-template-columns: 1fr 1fr; } .veh-row label:last-child { grid-column: 1 / -1; margin-top: 12px; } }
 .carbox h3 { font-size: 15px; display: flex; gap: 8px; align-items: center; }
 
 /* ---------- Cart & checkout ---------- */

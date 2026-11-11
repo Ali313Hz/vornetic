@@ -731,7 +731,7 @@ function editProduct(src) {
         </div>
         <div class="f"><span class="lbl">${L('Tip', 'Tipo')}</span><div class="seg">
           <button type="button" data-act="fit" data-v="universal" class="${P.fitment !== 'car' ? 'on' : ''}">Universal</button>
-          <button type="button" data-act="fit" data-v="car" class="${P.fitment === 'car' ? 'on' : ''}">${L('Arabaya özel (müşteri arabasını seçer)', 'Según coche (el cliente elige su coche)')}</button></div></div>
+          <button type="button" data-act="fit" data-v="car" class="${P.fitment === 'car' ? 'on' : ''}">${L('Araca özel (müşteri marka, model ve yılı yazar)', 'A medida (el cliente escribe marca, modelo y año)')}</button></div></div>
         <p class="muted small" style="margin:0">${L('Yakında = sitede görünür, "Próximamente" yazar, satın alınamaz. Gizli = sitede görünmez.', 'Próximamente = sale en la web con "Próximamente" y no se puede comprar. Oculto = no sale en la web.')}</p>
       </div>
 

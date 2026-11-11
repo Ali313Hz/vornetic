@@ -247,6 +247,24 @@ function cleanCar(c) {
 }
 const carLabel = c => `${c.brand} ${c.model} ${c.gen} · ${c.year}${c.engine ? ' · ' + c.engine : ''}`;
 
+// The vehicle of a made-to-measure order (EVO mats) is typed by the customer: brand, model, year.
+// It is free text, so it is cleaned here (no control characters or < >, one line, limited length) and
+// the year must be a real one. The shop's car list is only for the bulb finder.
+const VEHICLE_MIN_YEAR = 1950;
+function cleanVehicle(c) {
+  if (!c || typeof c !== 'object') return null;
+  const text = (v, max) => {
+    const s = String(v ?? '').replace(/[\u0000-\u001f\u007f<>]/g, ' ').replace(/\s+/g, ' ').trim();
+    return s.length <= max && /[\p{L}\p{N}]/u.test(s) ? s : '';        // too long, or no letter or number: not valid
+  };
+  const brand = text(c.brand, 40), model = text(c.model, 60);
+  const y = String(c.year ?? '').trim();
+  const year = /^\d{4}$/.test(y) ? Number(y) : 0;
+  if (!brand || !model || year < VEHICLE_MIN_YEAR || year > new Date().getFullYear() + 1) return null;
+  return { brand, model, year };
+}
+const vehicleLabel = c => `${c.brand} ${c.model} · ${c.year}`;
+
 // ---------- Customer sessions ----------
 const userCookie = { httpOnly: true, sameSite: 'lax', secure: IS_PROD, maxAge: 60 * 24 * 3600 * 1000 };
 function currentUser(req) {
@@ -553,7 +571,7 @@ const ORDER_MSG = {
   out: ['Out of stock: {name}', 'Agotado: {name}'],
   choose: ['Please choose all the options for {name}', 'Elige todas las opciones de {name}'],
   unavailable: ['{name} is not available with the options you chose', '{name} no está disponible con las opciones elegidas'],
-  car: ['Please choose your car for {name}', 'Elige tu coche para {name}'],
+  car: ["Please enter your vehicle's brand, model and year for {name}", 'Escribe la marca, el modelo y el año de tu vehículo para {name}'],
   stock: ['Not enough stock: {name} (only {stock} left, you asked for {qty})', 'No hay stock suficiente: {name} (quedan {stock}, has pedido {qty})'],
 };
 const orderMsg = (lang, key, p, vars = {}) => ORDER_MSG[key][lang === 'es' ? 1 : 0]
@@ -577,9 +595,9 @@ function cleanLine(it, lang) {
   const { unit, labels, labelsEs } = sel;
   let car = null;
   if (p.fitment === 'car') {
-    const c = cleanCar(it.car);
+    const c = cleanVehicle(it.car);
     if (!c) throw new Error(orderMsg(lang, 'car', p));
-    car = carLabel(c);
+    car = vehicleLabel(c);
   }
   return { id: p.id, name: p.name_en, name_es: p.name_es, qty, unit_cents: unit, options: labels, options_es: labelsEs, car };
 }

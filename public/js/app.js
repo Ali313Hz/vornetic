@@ -21,10 +21,14 @@ const T = {
     trust2: '3-year guarantee', trust2s: 'Legal guarantee in the EU',
     trust3: '14-day returns', trust3s: 'Custom EVO mats: only if faulty',
     trust4: 'Secure payment', pm_card: 'Visa, Mastercard', pm_paypal: 'PayPal', pm_revolut_pay: 'Revolut Pay', pm_bizum: 'Bizum', pm_transfer: 'bank transfer', pay_safe: 'Secure payments', pm_contact: 'Payment details after the order',
-    evo_for: 'EVO custom mats for your car', universal_title: 'Universal mats', lighting_title: 'Lighting',
+    evo_for: 'EVO custom-fit mats', universal_title: 'Universal mats', lighting_title: 'Lighting',
     lighting_note: "Not sure which bulb your car uses? The code is printed on your current bulb, or send us a WhatsApp with your car.",
     add: 'Add to cart', added: 'Added to cart', view_cart: 'View cart', qty: 'Quantity',
-    select_car_first: 'Select your car (brand, model, generation and year) to order these mats.',
+    veh_title: 'Your vehicle', veh_note: "Write your vehicle's brand, model and year yourself, as they appear on its registration papers. With that we get the exact size. The 3D picture only shows the type of vehicle.",
+    veh_ph_brand: 'e.g. Seat', veh_ph_model: 'e.g. Leon', veh_ph_year: 'e.g. 2019',
+    veh_missing: "Write your vehicle's brand, model and year.", veh_year_bad: 'Write the year with 4 digits, for example 2019.',
+    v3d_3d: '3D', v3d_top: 'Top view', v3d_hint: 'Drag to turn it', v3d_alt: '3D illustration', v3d_pick: 'choose the type of vehicle',
+    v3d_note: 'Illustration of the type of vehicle and of the mats in your set. It is not your exact model.',
     please_choose: 'Please choose', sold_out: 'Sold out', tax_incl: 'VAT included', not_available: 'Not available in this combination',
     cart: 'Cart', cart_empty: 'Your cart is empty.', keep_shopping: 'Continue shopping', remove: 'Remove',
     subtotal: 'Subtotal', shipping: 'Shipping', free: 'Free', total: 'Total', checkout: 'Checkout',
@@ -122,10 +126,14 @@ const T = {
     trust2: '3 años de garantía', trust2s: 'Garantía legal en la UE',
     trust3: 'Devolución 14 días', trust3s: 'EVO a medida: solo si tienen defecto',
     trust4: 'Pago seguro', pm_card: 'Visa, Mastercard', pm_paypal: 'PayPal', pm_revolut_pay: 'Revolut Pay', pm_bizum: 'Bizum', pm_transfer: 'transferencia', pay_safe: 'Pagos seguros', pm_contact: 'Datos de pago tras el pedido',
-    evo_for: 'Alfombrillas EVO a medida para tu coche', universal_title: 'Alfombrillas universales', lighting_title: 'Iluminación',
+    evo_for: 'Alfombrillas EVO a medida', universal_title: 'Alfombrillas universales', lighting_title: 'Iluminación',
     lighting_note: '¿No sabes qué bombilla lleva tu coche? El código viene impreso en tu bombilla actual, o escríbenos por WhatsApp con tu coche.',
     add: 'Añadir al carrito', added: 'Añadido al carrito', view_cart: 'Ver carrito', qty: 'Cantidad',
-    select_car_first: 'Selecciona tu coche (marca, modelo, generación y año) para pedir estas alfombrillas.',
+    veh_title: 'Tu vehículo', veh_note: 'Escribe tú mismo la marca, el modelo y el año de tu vehículo, tal como figuran en su documentación. Con eso tenemos la medida exacta. La imagen 3D solo muestra el tipo de vehículo.',
+    veh_ph_brand: 'p. ej. Seat', veh_ph_model: 'p. ej. León', veh_ph_year: 'p. ej. 2019',
+    veh_missing: 'Escribe la marca, el modelo y el año de tu vehículo.', veh_year_bad: 'Escribe el año con 4 cifras, por ejemplo 2019.',
+    v3d_3d: '3D', v3d_top: 'Vista desde arriba', v3d_hint: 'Arrastra para girarlo', v3d_alt: 'Ilustración 3D', v3d_pick: 'elige el tipo de vehículo',
+    v3d_note: 'Imagen ilustrativa del tipo de vehículo y de las alfombrillas de tu juego. No es tu modelo exacto.',
     please_choose: 'Por favor, elige', sold_out: 'Agotado', tax_incl: 'IVA incluido', not_available: 'No disponible en esta combinación',
     cart: 'Carrito', cart_empty: 'Tu carrito está vacío.', keep_shopping: 'Seguir comprando', remove: 'Eliminar',
     subtotal: 'Subtotal', shipping: 'Envío', free: 'Gratis', total: 'Total', checkout: 'Finalizar compra',
@@ -267,7 +275,7 @@ const myCar = {
     if (!fromServer && ME) post('/api/account/me', { car: c }, 'PUT').then(r => { ME = r.user; }).catch(() => {});
   },
   clear() { store.del('vcar2'); },
-  label: c => c ? `${c.brand} ${c.model} ${c.gen} · ${c.year}${c.engine ? ' · ' + c.engine : ''}` : '',
+  label: c => c ? `${[c.brand, c.model, c.gen].filter(Boolean).join(' ')} · ${c.year}${c.engine ? ' · ' + c.engine : ''}` : '',
 };
 
 /* ================= product options & variants ================= */
@@ -304,6 +312,22 @@ function valueState(p, sel, oid, vid) {
   if (valOf(p, oid, vid)?.out) return 'out';
   const test = { ...sel, [oid]: vid };
   return allCombos(p).some(ids => fitsSel(p, ids, test) && comboSellable(p, ids)) ? 'ok' : 'off';
+}
+// What the options of a product show for the choices made so far: [{ hidden, values: { valueId: { state, hidden } } }].
+// Made-to-measure products (EVO mats) go step by step: an option appears once the one before it is chosen, and
+// shows only the values that go with the earlier choices. The first option (the type of vehicle) can always be
+// changed to any value: the later choices that no longer fit are dropped when it is.
+function optionView(p, sel, madeToMeasure) {
+  return p.options.map((o, gi) => {
+    const first = madeToMeasure && gi === 0;
+    return {
+      hidden: !!madeToMeasure && gi > 0 && !sel[p.options[gi - 1].id],
+      values: Object.fromEntries(o.values.map(v => {
+        const state = valueState(p, first ? {} : sel, o.id, v.id);
+        return [v.id, { state, hidden: !!madeToMeasure && !first && state === 'off' }];
+      })),
+    };
+  });
 }
 // Exact price for a full selection, lowest possible price for a partial one, null if nothing can be bought
 function unitPrice(p, sel) {
@@ -679,16 +703,13 @@ async function viewCategory(slug) {
   let list = PRODUCTS.filter(p => p.category === slug)
     .sort((a, b) => (b.fitment === 'car') - (a.fitment === 'car') || (a.status === 'soon') - (b.status === 'soon'));
   if (o) list = list.filter(p => optionFor(p, o));
-  const hasCarFit = list.some(p => p.fitment === 'car');
-  const c = myCar.get();
   app.innerHTML = `<div class="wrap page">
     <h1>${esc(L(cat.name))}</h1>
     ${L(cat.desc) ? `<p class="muted" style="max-width:720px">${esc(L(cat.desc))}</p>` : ''}
     ${o ? `<p class="mycar" style="margin:14px 0 22px"><span>${esc(t('showing'))} <b>${esc(o)}</b></span><a class="link" href="/c/${esc(slug)}" data-link>${esc(t('show_all'))}</a></p>`
-      : hasCarFit ? `<div style="margin:18px 0 24px">${c ? myCarBar(c) : finderBox()}</div>` : '<div style="height:12px"></div>'}
+      : '<div style="height:12px"></div>'}
     ${list.length ? gridHtml(list, o) : `<p class="muted">${esc(t('cat_empty'))}</p>`}
   </div>`;
-  if (hasCarFit && !o) bindCarArea();
 }
 
 async function viewCar() {
@@ -712,6 +733,8 @@ async function viewCar() {
   $('#carChange').addEventListener('click', () => { myCar.clear(); rerenderInPlace(); });
 }
 
+// The drawing that stands in for a photo of the EVO mats (the 3D picture replaces it on the product page)
+const EVO_DRAWING = '/img/p-mat-evo.svg';
 // Swipeable gallery (photos + videos). Returns { show(list) }.
 function mountGallery(root, name) {
   let current = '';
@@ -768,7 +791,8 @@ function priceTables(text) {
 }
 // The price of every choice that can be bought, from the product's own options — the same numbers
 // the cart charges. Columns = the last option; rows = the one before; with three options, one table
-// per value of the first. Choices that are not sold are left out.
+// per value of the first; values of the first option whose table is the same share one (a sedan, a compact
+// car and an SUV cost the same: one table titled "Sedan / Compact / SUV"). Choices that are not sold are left out.
 function optionTables(p) {
   const n = p.options.length;
   if (!n) return [];
@@ -780,7 +804,12 @@ function optionTables(p) {
   const rowsFor = pre => sold(p.options[n - 2].values.map(r => [L(r), ...last.values.map(c => cell([...pre, r.id, c.id]))]));
   const tables = n === 2 ? [{ title: L(p.options[0]), cols, rows: rowsFor([]) }]
     : p.options[0].values.map(g => ({ title: L(g), cols, rows: rowsFor([g.id]) }));
-  return tables.filter(tb => tb.rows.length);
+  const merged = [];
+  for (const tb of tables.filter(tb => tb.rows.length)) {
+    const same = merged.find(m => JSON.stringify([m.cols, m.rows]) === JSON.stringify([tb.cols, tb.rows]));
+    if (same) same.title += ' / ' + tb.title; else merged.push({ ...tb });
+  }
+  return merged;
 }
 function priceTableHtml(tb) {
   const name = s => { const [main, ...rest] = s.split(' · '); return `${esc(main)}${rest.length ? `<small>${esc(rest.join(' · '))}</small>` : ''}`; };
@@ -811,28 +840,34 @@ async function viewProduct(slug) {
   const canBuy = !soon && p.in_stock;
   const prices = pricesHtml(p);
   const sel = {};
-  let car = p.fitment === 'car' ? myCar.get() : null;
+  const madeToMeasure = p.fitment === 'car';           // EVO mats: type of vehicle chosen, the vehicle itself typed
   let qty = 1;
   document.body.classList.add('has-buybar');
 
   app.innerHTML = `<div class="wrap">
     <div class="crumbs"><a href="/" data-link>${esc(t('nav_home'))}</a> / ${cat ? `<a href="/c/${esc(cat.slug)}" data-link>${esc(L(cat.name))}</a>` : ''}</div>
-    <div class="pdp">
+    <div class="pdp${madeToMeasure ? ' mtm' : ''}">
       <div class="gallery" id="gallery"></div>
       <div class="pinfo">
-        <span class="muted small">${esc(p.fitment === 'car' ? t('fits_car') : L(cat?.name))}</span>
+        <span class="muted small">${esc(madeToMeasure ? t('made_for') : L(cat?.name))}</span>
         <h1 class="ptitle">${esc(L(p.name))}</h1>
         <button type="button" class="rv-sum" id="rvSum" hidden></button>
         <div class="price" id="price"></div>
         ${prices ? `<p class="see-prices"><button type="button" class="link" id="seePrices">${esc(t('see_prices'))}</button></p>` : ''}
         ${soon ? `<div class="notice soon-note">${esc(t('soon_note'))}${CONFIG.whatsapp ? ` <a class="link" href="${waLink(`${t('notify_msg')}: ${L(p.name)}`)}" target="_blank" rel="noopener">${esc(t('notify_wa'))}</a>` : ''}</div>` : ''}
-        ${p.fitment === 'car' ? `<div class="carbox"><h3>${ICON.car} ${esc(t('finder_title'))}</h3><div class="car-row" id="pCar"></div>
-          ${CONFIG.whatsapp ? `<p class="muted small" style="margin:10px 0 0"><a class="link" href="${waLink(L(p.name))}" target="_blank" rel="noopener">${esc(t('not_listed'))}</a></p>` : ''}</div>` : ''}
+        ${madeToMeasure ? '<div class="v3d-m" id="viewerM"></div>' : ''}
         ${p.options.map(o => `<div class="opt-group${o.values.length === 1 && !o.values[0].soon && !o.values[0].out ? ' one' : ''}" data-o="${esc(o.id)}">
           <span>${esc(L(o))}: <b data-chosen></b></span>
           <div class="opts">${o.values.map(v => `<button type="button" class="opt" data-v="${esc(v.id)}">${esc(L(v))}${v.soon
             ? `<small>${esc(t('soon_short'))}</small>` : v.out ? `<small>${esc(t('opt_out'))}</small>` : ''}</button>`).join('')}</div>
         </div>`).join('')}
+        ${madeToMeasure ? `<div class="carbox" id="vehBox"><h3>${ICON.car} ${esc(t('veh_title'))}</h3>
+          <p class="muted small" style="margin:0 0 12px">${esc(t('veh_note'))}</p>
+          <div class="veh-row">
+            <label class="f"><span>${esc(t('brand'))}</span><input class="in" id="vBrand" maxlength="40" autocomplete="off" placeholder="${esc(t('veh_ph_brand'))}"></label>
+            <label class="f"><span>${esc(t('model'))}</span><input class="in" id="vModel" maxlength="60" autocomplete="off" placeholder="${esc(t('veh_ph_model'))}"></label>
+            <label class="f"><span>${esc(t('year'))}</span><input class="in" id="vYear" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="${esc(t('veh_ph_year'))}"></label>
+          </div></div>` : ''}
         <div id="pErr"></div>
         <div class="buy-row">
           <div class="qty"><button type="button" data-q="-1" aria-label="-">−</button><input id="qty" type="number" min="1" max="10" value="1" aria-label="${esc(t('qty'))}"><button type="button" data-q="1" aria-label="+">+</button></div>
@@ -857,7 +892,17 @@ async function viewProduct(slug) {
     <section class="reviews" id="reviews" aria-labelledby="rvTitle"></section>
   </div>`;
 
-  const gallery = mountGallery($('#gallery'), L(p.name));
+  // Made-to-measure: a 3D picture of the chosen type of vehicle (photos, if any were added, go under it).
+  // It is drawn twice: in the gallery column, and above the options on a phone (CSS shows one of them), so the
+  // picture and the choices are on the screen together.
+  let viewers = [], photos = null, viewerKey = '';
+  if (madeToMeasure && window.Vehicle3D) {
+    $('#gallery').innerHTML = '<div id="viewer"></div><div id="photos"></div>';
+    const text = { view3d: t('v3d_3d'), viewTop: t('v3d_top'), hint: t('v3d_hint'), note: t('v3d_note') };
+    viewers = [Vehicle3D.mount($('#viewer'), { text }), Vehicle3D.mount($('#viewerM'), { text })];
+    photos = mountGallery($('#photos'), L(p.name));
+  }
+  const gallery = viewers.length ? null : mountGallery($('#gallery'), L(p.name));
   mountReviews(p, id);
 
   // Description / Prices tabs ("See all prices" under the price opens the second one)
@@ -887,10 +932,13 @@ async function viewProduct(slug) {
     const complete = isComplete(p, sel);
     $('#price').innerHTML = unit == null ? `<span class="muted" style="font-size:16px">${esc(t('not_available'))}</span>`
       : `${!complete && p.from ? `<span class="from">${esc(t('from'))}</span>` : ''}${eur(unit)}${p.old_price_cents && complete && unit === p.base_cents ? `<span class="old">${eur(p.old_price_cents)}</span>` : ''}`;
-    $$('.opt-group').forEach(g => {
+    const view = optionView(p, sel, madeToMeasure);
+    $$('.opt-group').forEach((g, gi) => {
       const oid = g.dataset.o;
+      g.hidden = view[gi].hidden;
       $$('.opt', g).forEach(b => {
-        const st = valueState(p, sel, oid, b.dataset.v);
+        const { state: st, hidden } = view[gi].values[b.dataset.v];
+        b.hidden = hidden;
         b.classList.toggle('on', sel[oid] === b.dataset.v);
         b.classList.toggle('is-soon', st === 'soon');
         b.classList.toggle('is-out', st === 'out');
@@ -898,7 +946,17 @@ async function viewProduct(slug) {
       });
       $('[data-chosen]', g).textContent = sel[oid] ? L(valOf(p, oid, sel[oid])) : '';
     });
-    gallery.show(mediaFor(p, sel));
+    if (viewers.length) {
+      const key = `${sel.veh || ''}|${sel.set || ''}`;
+      if (key !== viewerKey) {
+        viewerKey = key;
+        const vv = sel.veh && valOf(p, 'veh', sel.veh), ss = sel.set && valOf(p, 'set', sel.set);
+        viewers.forEach(v => v.set({ vehicle: sel.veh, set: sel.set,
+          label: `${t('v3d_alt')}: ${vv ? [L(vv), ss && L(ss)].filter(Boolean).join(' · ') : t('v3d_pick')}` }));
+      }
+      const real = mediaFor(p, sel).filter(m => m.src !== EVO_DRAWING);
+      if (real.length) photos.show(real); else $('#photos').replaceChildren();
+    } else gallery.show(mediaFor(p, sel));
   };
   refresh();
 
@@ -913,14 +971,22 @@ async function viewProduct(slug) {
   const qIn = $('#qty');
   $$('[data-q]').forEach(b => b.addEventListener('click', () => { qty = Math.max(1, Math.min(10, (+qIn.value || 1) + +b.dataset.q)); qIn.value = qty; }));
   qIn.addEventListener('change', () => { qty = Math.max(1, Math.min(10, +qIn.value || 1)); qIn.value = qty; });
-  if (p.fitment === 'car') mountCarSelect($('#pCar'), car, c => { car = c; if (c) myCar.set(c); $('#pErr').innerHTML = ''; });
 
   $('#addBtn').addEventListener('click', () => {
     const err = m => { $('#pErr').innerHTML = `<p class="notice err">${esc(m)}</p>`; $('#pErr').scrollIntoView({ block: 'center', behavior: 'smooth' }); };
-    if (p.fitment === 'car' && !car) return err(t('select_car_first'));
     const missing = p.options.find(o => !sel[o.id]);
     if (missing) return err(`${t('please_choose')}: ${L(missing)}`);
     if (unitPrice(p, sel) == null) return err(t('not_available'));
+    let car = null;
+    if (madeToMeasure) {
+      // the vehicle is typed by the customer; the server checks it again
+      const one = id => $(id).value.trim().replace(/\s+/g, ' ');
+      const v = { brand: one('#vBrand'), model: one('#vModel'), year: one('#vYear') };
+      const empty = ['#vBrand', '#vModel', '#vYear'].find(id => !one(id));
+      if (empty) { $(empty).focus(); return err(t('veh_missing')); }
+      if (!/^\d{4}$/.test(v.year) || +v.year < 1950 || +v.year > new Date().getFullYear() + 1) { $('#vYear').focus(); return err(t('veh_year_bad')); }
+      car = { brand: v.brand, model: v.model, year: +v.year };
+    }
     cart.add(p, qty, { ...sel }, car);
     toast(`${esc(t('added'))} <a href="/cart" data-link>${esc(t('view_cart'))} →</a>`);
   });

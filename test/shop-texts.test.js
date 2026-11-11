@@ -35,7 +35,7 @@ test('order errors come in the checkout language (ES and EN)', async () => {
       [{ items: [{ id: p, qty: 1 }], extra: { payment_method: 'bizum' } }, 'Este método de pago no está disponible', 'Payment method not available'],
       [{ items: [{ id: 999999, qty: 1 }] }, 'Un producto de tu carrito ya no está disponible', 'A product in your cart is no longer available'],
       [{ items: [{ id: none, qty: 1 }] }, 'Agotado: Artículo test', 'Out of stock: Test item'],
-      [{ items: [{ id: car, qty: 1 }] }, 'Elige tu coche para Artículo test', 'Please choose your car for Test item'],
+      [{ items: [{ id: car, qty: 1 }] }, 'Escribe la marca, el modelo y el año de tu vehículo para Artículo test', "Please enter your vehicle's brand, model and year for Test item"],
       [{ items: [{ id: few, qty: 5 }] }, 'No hay stock suficiente: Artículo test (quedan 2, has pedido 5)', 'Not enough stock: Test item (only 2 left, you asked for 5)'],
     ];
     for (const [c, es, en] of cases) {
