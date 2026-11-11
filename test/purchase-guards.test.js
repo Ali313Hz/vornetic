@@ -1,6 +1,6 @@
 // test/purchase-guards.test.js — what the server refuses to sell, whatever the browser sends:
-// "coming soon" products (e.g. EVO before launch), out-of-stock or coming-soon choices (a colour),
-// combinations switched off, missing choices, and made-to-measure products without a valid car.
+// "coming soon" products, out-of-stock or coming-soon choices (a colour), combinations switched off, missing choices,
+// and made-to-measure (EVO) products, which are requests and never an order.
 // Real server, throwaway data.
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -80,42 +80,26 @@ test('a value is never both "coming soon" and "out of stock"; out of stock wins'
   assert.deepStrictEqual([o.values[0].soon, o.values[0].out], [false, true]);
 });
 
-test('made-to-measure (car) products need the vehicle typed by the customer (brand, model, year), checked by the server', async () => {
+test('made-to-measure (EVO) products are never an order: refused whatever is sent, no stock taken, nothing for the payment page', async () => {
   const srv = await setup();
   try {
     const p = await srv.product({ fitment: 'car' });
     const car = { brand: 'Seat', model: 'León', year: 2019 };
-    const buy = c => srv.buy([{ id: p.id, qty: 1, car: c }]);
-    const msg = 'Escribe la marca, el modelo y el año de tu vehículo para Artículo test';
-    const thisYear = new Date().getFullYear();
-    for (const [why, c] of [
-      ['no vehicle', undefined],
-      ['not an object', 'Seat León 2019'],
-      ['no brand', { ...car, brand: '' }],
-      ['blank brand', { ...car, brand: '   ' }],
-      ['no model', { ...car, model: undefined }],
-      ['no year', { ...car, year: '' }],
-      ['year with letters', { ...car, year: '20l9' }],
-      ['year with 2 digits', { ...car, year: '19' }],
-      ['year with 5 digits', { ...car, year: 20190 }],
-      ['year before 1950', { ...car, year: 1949 }],
-      ['year too far ahead', { ...car, year: thisYear + 2 }],
-      ['brand too long', { ...car, brand: 'x'.repeat(41) }],
-      ['model too long', { ...car, model: 'x'.repeat(61) }],
-      ['brand without a letter or number', { ...car, brand: '---' }],
+    const es = 'Artículo test no se pide en la tienda: envía una solicitud en la página del producto. Confirmamos que las alfombrillas encajan antes de cobrar nada.';
+    const en = 'Test item is not ordered in the shop: send a request on the product page. We confirm that the mats fit before anything is charged.';
+    for (const [why, item] of [
+      ['with a valid vehicle', { id: p.id, qty: 1, car }],
+      ['without a vehicle', { id: p.id, qty: 1 }],
+      ['with a price from the browser', { id: p.id, qty: 1, car, unit_cents: 1, price_cents: 1 }],
     ]) {
-      const r = await buy(c);
-      assert.deepStrictEqual([r.status, r.body.error], [400, msg], why);
+      const a = await srv.buy([item], 'es'), b = await srv.buy([item], 'en');
+      assert.deepStrictEqual([a.status, a.body.error, b.status, b.body.error], [400, es, 400, en], why);
     }
-    assert.strictEqual(await srv.stock(p.id), 5, 'nothing taken from stock');
-
-    // any real vehicle can be typed (it does not have to be in the shop's car list); the order keeps it as one clean line
-    const typed = await buy({ brand: '  Seat\n', model: '  León   FR  <b>1.5</b>', year: String(thisYear + 1) });
-    assert.strictEqual(typed.status, 200, JSON.stringify(typed.body));
-    assert.strictEqual((await srv.lines(typed.body.ref))[0].car, `Seat León FR b 1.5 /b · ${thisYear + 1}`);
-    const old = await buy({ brand: 'Seat', model: 'León', gen: 'KL', engine: 'whatever', year: 1950 });
-    assert.strictEqual(old.status, 200, 'an older cart with a generation is still accepted; the extra fields are dropped');
-    assert.strictEqual((await srv.lines(old.body.ref))[0].car, 'Seat León · 1950');
-    assert.strictEqual(await srv.stock(p.id), 3);
+    // inside a bigger cart it refuses the whole order: nothing else is taken either
+    const other = await srv.product({});
+    const mixed = await srv.buy([{ id: other.id, qty: 1 }, { id: p.id, qty: 1, car }]);
+    assert.strictEqual(mixed.status, 400);
+    assert.deepStrictEqual([await srv.stock(p.id), await srv.stock(other.id)], [5, 5], 'nothing taken from stock');
+    assert.strictEqual((await srv.admin('GET', '/api/admin/orders')).body.length, 0, 'no order was made');
   } finally { await srv.stop(); }
 });

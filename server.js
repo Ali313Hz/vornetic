@@ -13,6 +13,7 @@ const mail = require('./mail');
 const catalog = require('./catalog');
 const stripeConfig = require('./stripe');
 const finance = require('./finance');
+const evo = require('./evo');
 const { adminLang } = require('./admin-i18n');
 const { stripImageMeta } = require('./image-meta');
 
@@ -247,24 +248,6 @@ function cleanCar(c) {
 }
 const carLabel = c => `${c.brand} ${c.model} ${c.gen} · ${c.year}${c.engine ? ' · ' + c.engine : ''}`;
 
-// The vehicle of a made-to-measure order (EVO mats) is typed by the customer: brand, model, year.
-// It is free text, so it is cleaned here (no control characters or < >, one line, limited length) and
-// the year must be a real one. The shop's car list is only for the bulb finder.
-const VEHICLE_MIN_YEAR = 1950;
-function cleanVehicle(c) {
-  if (!c || typeof c !== 'object') return null;
-  const text = (v, max) => {
-    const s = String(v ?? '').replace(/[\u0000-\u001f\u007f<>]/g, ' ').replace(/\s+/g, ' ').trim();
-    return s.length <= max && /[\p{L}\p{N}]/u.test(s) ? s : '';        // too long, or no letter or number: not valid
-  };
-  const brand = text(c.brand, 40), model = text(c.model, 60);
-  const y = String(c.year ?? '').trim();
-  const year = /^\d{4}$/.test(y) ? Number(y) : 0;
-  if (!brand || !model || year < VEHICLE_MIN_YEAR || year > new Date().getFullYear() + 1) return null;
-  return { brand, model, year };
-}
-const vehicleLabel = c => `${c.brand} ${c.model} · ${c.year}`;
-
 // ---------- Customer sessions ----------
 const userCookie = { httpOnly: true, sameSite: 'lax', secure: IS_PROD, maxAge: 60 * 24 * 3600 * 1000 };
 function currentUser(req) {
@@ -308,6 +291,7 @@ app.get('/api/config', (req, res) => {
     card_methods: STRIPE_KEY ? stripeMethods(s) : [],
     company: { name: s.company_name, holder: s.company_holder, nif: s.company_nif, address: s.company_address },
     countries: countries(s),
+    evo_zip_prefixes: evo.zipPrefixes(s.evo_measure_zip_prefixes),
     mail: mail.enabled,
   });
 });
@@ -571,7 +555,7 @@ const ORDER_MSG = {
   out: ['Out of stock: {name}', 'Agotado: {name}'],
   choose: ['Please choose all the options for {name}', 'Elige todas las opciones de {name}'],
   unavailable: ['{name} is not available with the options you chose', '{name} no está disponible con las opciones elegidas'],
-  car: ["Please enter your vehicle's brand, model and year for {name}", 'Escribe la marca, el modelo y el año de tu vehículo para {name}'],
+  evo_request: ['{name} is not ordered in the shop: send a request on the product page. We confirm that the mats fit before anything is charged.', '{name} no se pide en la tienda: envía una solicitud en la página del producto. Confirmamos que las alfombrillas encajan antes de cobrar nada.'],
   stock: ['Not enough stock: {name} (only {stock} left, you asked for {qty})', 'No hay stock suficiente: {name} (quedan {stock}, has pedido {qty})'],
 };
 const orderMsg = (lang, key, p, vars = {}) => ORDER_MSG[key][lang === 'es' ? 1 : 0]
@@ -593,13 +577,10 @@ function cleanLine(it, lang) {
     throw new Error(orderMsg(lang, e.code, choice));
   }
   const { unit, labels, labelsEs } = sel;
-  let car = null;
-  if (p.fitment === 'car') {
-    const c = cleanVehicle(it.car);
-    if (!c) throw new Error(orderMsg(lang, 'car', p));
-    car = vehicleLabel(c);
-  }
-  return { id: p.id, name: p.name_en, name_es: p.name_es, qty, unit_cents: unit, options: labels, options_es: labelsEs, car };
+  // Made-to-measure (EVO) mats are never an order: they are a request the shop confirms first (see /api/evo/requests),
+  // so nothing for them can reach the payment page or take stock.
+  if (p.fitment === 'car') throw new Error(orderMsg(lang, 'evo_request', p));
+  return { id: p.id, name: p.name_en, name_es: p.name_es, qty, unit_cents: unit, options: labels, options_es: labelsEs, car: null };
 }
 
 // Run fn as one SQLite transaction: either all of its changes are saved or none are
@@ -1073,6 +1054,109 @@ app.post('/api/withdraw', limit(10, 30 * 60 * 1000), (req, res) => {
   res.json({ ok: true, ref: o.ref, at: w.created_at, mail: mail.enabled });
 });
 
+// ---------- EVO made-to-measure requests (rules in evo.js) ----------
+// A request is not an order: nothing is charged, no stock is held and Stripe is never involved. The shop
+// confirms by hand that the mats fit; a vehicle without a template is measured in person, in the Madrid area only.
+const evoTemplates = () => db.prepare('SELECT * FROM evo_templates ORDER BY brand, model, year_from, id').all().map(evo.templateRow);
+// the made-to-measure product that takes requests: the one named, or (no name) the first one that is available
+const evoProduct = slug => slug
+  ? db.prepare("SELECT * FROM products WHERE fitment = 'car' AND status = 'available' AND slug = ?").get(String(slug))
+  : db.prepare("SELECT * FROM products WHERE fitment = 'car' AND status = 'available' ORDER BY sort, id LIMIT 1").get();
+const templateById = (list, id) => list.find(t => t.id === id) || null;
+function newEvoRef() {
+  for (;;) {
+    const ref = 'EV-' + crypto.randomBytes(3).toString('hex').toUpperCase();
+    if (!db.prepare('SELECT 1 FROM evo_requests WHERE ref = ?').get(ref)) return ref;
+  }
+}
+
+// the vehicles the shop has templates for, as the page lists them
+app.get('/api/evo/templates', (req, res) => {
+  const list = evoTemplates();
+  res.json({
+    confirmed: list.filter(t => t.status === 'confirmed').map(t => ({ label: evo.templateLabel(t), body: t.body, wheelbase: t.wheelbase, roof: t.roof, layout: t.layout })),
+    pending_brands: [...new Set(list.filter(t => t.status === 'pending').map(t => t.brand))],
+  });
+});
+// what the typed vehicle means (for the page to explain while the customer fills the form; the request is checked again)
+app.post('/api/evo/check', limit(120, 10 * 60 * 1000), (req, res) => {
+  const b = req.body || {};
+  const pv = evo.parseVehicle(b.vehicle);
+  if (pv.error) return res.json({ ok: false, error: pv.error });
+  const m = evo.matchTemplate(evoTemplates(), { ...pv.vehicle, veh: str(b.veh, 20), layout: str(b.layout, 10), wheelbase: str(b.wheelbase, 10), roof: str(b.roof, 10) });
+  res.json({ ok: true, kind: m.kind === 'none' ? 'measurement' : m.kind, label: evo.templateLabel(m.template), reasons: m.reasons,
+    area_ok: evo.inMeasureArea(b.zip, getSettings().evo_measure_zip_prefixes) });
+});
+app.post('/api/evo/requests', limit(10, 30 * 60 * 1000), (req, res) => {
+  const b = req.body || {};
+  const product = evoProduct(b.product);
+  if (!product) return res.status(404).json({ error: 'Not found' });
+  const templates = evoTemplates();
+  const s = getSettings();
+  const r = evo.validateRequest(b, { templates, settings: s, product, catalog, isEmail });
+  if (r.bot) return res.json({ ok: true, ref: 'EV-000000', kind: 'measurement', mail: false });
+  if (r.error) return res.status(400).json({ error: r.error });
+  const c = r.clean, ref = newEvoRef();
+  const id = db.prepare(`INSERT INTO evo_requests (ref, kind, template_id, brand, model, year, veh, set_id, mat, cargo, layout, rows, wheelbase, roof, seats,
+      selection, ref_price_cents, name, email, phone, municipality, zip, message, lang) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(ref, c.kind, c.template_id, c.brand, c.model, c.year, c.veh, c.set, c.mat, c.cargo ? 1 : 0, c.layout, c.rows, c.wheelbase, c.roof, c.seats,
+      JSON.stringify(c.selection), c.ref_price_cents, c.name, c.email, c.phone, c.municipality, c.zip, c.message, c.lang).lastInsertRowid;
+  const row = db.prepare('SELECT * FROM evo_requests WHERE id = ?').get(id);
+  const label = evo.templateLabel(templateById(templates, c.template_id));
+  mail.evoRequestAck(row, s, label);
+  mail.shopEvoRequest(row, s, baseUrl(req), label);
+  res.json({ ok: true, ref, kind: c.kind, label, mail: mail.enabled });
+});
+
+// Panel: requests and templates
+const EVO_STATUS = ['new', 'contacted', 'confirmed', 'needs_measurement', 'declined', 'closed'];
+app.get('/api/admin/evo/requests', requireAdmin, (req, res) => {
+  const templates = evoTemplates();
+  res.json(db.prepare('SELECT * FROM evo_requests ORDER BY id DESC LIMIT 500').all()
+    .map(r => ({ ...r, selection: JSON.parse(r.selection || '{}'), template: evo.templateLabel(templateById(templates, r.template_id)) })));
+});
+app.put('/api/admin/evo/requests/:id', requireAdmin, (req, res) => {
+  const r = db.prepare('SELECT * FROM evo_requests WHERE id = ?').get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'Not found' });
+  const b = req.body || {};
+  const status = b.status === undefined ? r.status : b.status;
+  if (!EVO_STATUS.includes(status)) return res.status(400).json({ error: 'Geçersiz durum' });
+  const note = b.admin_note === undefined ? r.admin_note : String(b.admin_note ?? '').replace(/\r\n?/g, '\n').trim().slice(0, 1000);
+  db.prepare("UPDATE evo_requests SET status = ?, admin_note = ?, updated_at = datetime('now') WHERE id = ?").run(status, note, r.id);
+  res.json({ ok: true });
+});
+app.delete('/api/admin/evo/requests/:id', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM evo_requests WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+app.get('/api/admin/evo/templates', requireAdmin, (req, res) => {
+  res.json(evoTemplates().map(t => ({ ...t, aliases: t.aliases.join(', ') })));
+});
+const TEMPLATE_COLS = ['brand', 'model', 'aliases', 'year_from', 'year_to', 'body', 'wheelbase', 'roof', 'layout', 'status', 'note'];
+function templateFields(b) {
+  const f = evo.cleanTemplate(b || {});
+  return { ...f, aliases: JSON.stringify(f.aliases) };
+}
+app.post('/api/admin/evo/templates', requireAdmin, (req, res) => {
+  try {
+    const f = templateFields(req.body);
+    const id = db.prepare(`INSERT INTO evo_templates (${TEMPLATE_COLS.join(', ')}) VALUES (${TEMPLATE_COLS.map(() => '?').join(', ')})`).run(...TEMPLATE_COLS.map(c => f[c])).lastInsertRowid;
+    res.json({ ok: true, id });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.put('/api/admin/evo/templates/:id', requireAdmin, (req, res) => {
+  if (!db.prepare('SELECT 1 FROM evo_templates WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  try {
+    const f = templateFields(req.body);
+    db.prepare(`UPDATE evo_templates SET ${TEMPLATE_COLS.map(c => c + ' = ?').join(', ')} WHERE id = ?`).run(...TEMPLATE_COLS.map(c => f[c]), req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/admin/evo/templates/:id', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM evo_templates WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
 // ---------- Stripe (REST, no SDK) ----------
 async function stripe(method, url, params) {
   const r = await fetch(STRIPE_API + url, {
@@ -1197,6 +1281,7 @@ app.get('/api/admin/me', requireAdmin, (req, res) => res.json({
   // in production the panel warns when no backup has been copied off the server for 2 days
   backup: (b => ({ ...b, warn: IS_PROD && b.offsite_stale }))(backupStatus()),
   open_withdrawals: db.prepare('SELECT COUNT(*) c FROM withdrawals WHERE handled = 0').get().c,
+  evo_new: db.prepare("SELECT COUNT(*) c FROM evo_requests WHERE status = 'new'").get().c,
   overdue_orders: db.prepare(`SELECT COUNT(*) c FROM orders WHERE ${OVERDUE}`).get().c,
   upload: { photo_mb: MAX_PHOTO_MB, video_mb: MAX_VIDEO_MB, photo_ext: IMG_EXT, video_ext: VID_EXT },
 }));
@@ -1737,8 +1822,9 @@ function pageHtml(req) {
 <script type="application/ld+json">${JSON.stringify({
         '@context': 'https://schema.org', '@type': 'Product', name: p.name_es, description: desc, image: img,
         sku: p.slug, brand: { '@type': 'Brand', name: 'Vornetic' },
-        offers: { '@type': 'Offer', priceCurrency: 'EUR', price: (pp.price_cents / 100).toFixed(2), url: base + urlPath,
-          availability: pp.status === 'soon' ? 'https://schema.org/PreOrder' : p.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' },
+        // made-to-measure mats are a request the shop confirms, not a product with a price and stock: no offer for them
+        ...(p.fitment !== 'car' && { offers: { '@type': 'Offer', priceCurrency: 'EUR', price: (pp.price_cents / 100).toFixed(2), url: base + urlPath,
+          availability: pp.status === 'soon' ? 'https://schema.org/PreOrder' : p.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } }),
         // only real, visible reviews of verified buyers (shown on the page too)
         ...(rv.count && { aggregateRating: { '@type': 'AggregateRating', ratingValue: rv.avg, reviewCount: rv.count, bestRating: 5, worstRating: 1 } }),
       }).replace(/</g, '\u003c')}</script>`;

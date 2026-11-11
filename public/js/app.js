@@ -7,6 +7,7 @@ const T = {
   en: {
     site_title: 'Vornetic — Car Lighting & Mats',
     nav_car: 'Shop by car', nav_xenon: 'Xenon', nav_led: 'LED', nav_mats: 'Car mats', nav_home: 'Home',
+    hero_evo: 'Request EVO mats made to measure', hero_all: 'See all products',
     hero_title: 'Lighting and mats for your car',
     hero_lead: 'Xenon and LED bulbs, universal mats and EVO mats made to measure. Shipped from Spain.',
     finder_title: 'Find your car', brand: 'Brand', model: 'Model', gen: 'Generation', year: 'Year',
@@ -27,8 +28,38 @@ const T = {
     veh_title: 'Your vehicle', veh_note: "Write your vehicle's brand, model and year yourself, as they appear on its registration papers. With that we get the exact size. The 3D picture only shows the type of vehicle.",
     veh_ph_brand: 'e.g. Seat', veh_ph_model: 'e.g. Leon', veh_ph_year: 'e.g. 2019',
     veh_missing: "Write your vehicle's brand, model and year.", veh_year_bad: 'Write the year with 4 digits, for example 2019.',
-    v3d_3d: '3D', v3d_top: 'Top view', v3d_hint: 'Drag to turn it', v3d_alt: '3D illustration', v3d_pick: 'choose the type of vehicle',
-    v3d_note: 'Illustration of the type of vehicle and of the mats in your set. It is not your exact model.',
+    v3d_3d: '3D', v3d_rear: 'Rear view', v3d_top: 'Top view', v3d_hint: 'Drag to turn it', v3d_alt: '3D illustration', v3d_pick: 'choose the type of vehicle',
+    v3d_note: 'Illustration only: it shows a type of vehicle and the covering proposed for it. It is not a scan or the exact shape or measurements of your vehicle: we measure the real one.',
+    v3d_modes: 'What the picture shows', v3d_mode_vehicle: 'Vehicle', v3d_mode_luggage: 'Luggage area', v3d_mode_load: 'Load area',
+    v3d_cap_luggage: 'Luggage area of a passenger vehicle, behind the rear seats.', v3d_cap_cargo: 'Load floor of an empty commercial van, behind the cab.',
+    v3d_cap_kombi: 'Rear area of a passenger van (Kombi): the rows of seats take part of the length.', v3d_cap_crew: 'Rear area of a crew-cab van: the second row takes part of the length.',
+    v3d_cap_selected: 'The dark covering is what you chose.', v3d_cap_preview_car: 'The faint outline is the boot mat, which is not in the set you chose.',
+    v3d_cap_preview_van: 'Preview only: a load-area floor is quoted with the exact model and length and cannot be ordered online. Tick the box to ask for a quote.',
+    v3d_lbl_rear: 'Rear', v3d_lbl_seats: 'Seats', v3d_lbl_bulkhead: 'Bulkhead', v3d_lbl_coverage: 'Proposed covering',
+    evo_ref_price: 'List price. We confirm the final price once we have checked your vehicle.',
+    evo_how_title: 'How it works.', evo_how: 'This is a request, not an order. You choose the mats and tell us your vehicle; we check that we can make them and answer you. Nothing is charged and no stock is reserved when you send it.',
+    evo_pick: 'Choose…', evo_unknown: "I don't know",
+    evo_cfg_title: 'Configuration', evo_layout: 'Van configuration', evo_layout_cargo: 'Cargo van: empty load floor', evo_layout_kombi: 'Passenger van (Kombi) with rear seats', evo_layout_crew: 'Crew cab: second row of seats, load area behind',
+    evo_rows: 'Rows of seats (including the front one)', evo_wheelbase: 'Length / wheelbase', evo_roof: 'Roof height', evo_seats: 'Seats', evo_seats_5: '5 seats', evo_seats_7: '7 seats (third row)',
+    evo_cargo: 'Also ask for a quote for the load-area floor', evo_cargo_note: 'The load-area floor is priced with the exact model and length. It cannot be ordered online: we answer your request with a quote.',
+    evo_chk_candidate: 'Your vehicle seems to match one of our templates ({label}). We still check it ourselves before making anything.',
+    evo_chk_pending: 'We are confirming which {brand} models we have templates for. We will review yours and answer you.',
+    evo_chk_none: 'We do not have a template for this vehicle. It would have to be measured in person, and we only do that in the Madrid area. We cannot promise to make these mats before measuring it.',
+    evo_chk_none_known: 'We have a template for {label}, but not for your {diff}: we do not assume it fits other years, bodies, seating arrangements or wheelbases. Your vehicle would have to be measured in person, which we only do in the Madrid area.',
+    evo_diff_year: 'year', evo_diff_body: 'type of vehicle', evo_diff_wheelbase: 'length', evo_diff_roof: 'roof height', evo_diff_layout: 'configuration',
+    evo_measure_title: 'Measurement in person (Madrid area only)', evo_measure_note: 'We can only measure a vehicle in person in the Madrid area (postcodes starting with {zip}). Tell us where it is.',
+    evo_municipality: 'Municipality', evo_zip: 'Postcode',
+    evo_contact_title: 'Your contact details', evo_message: 'Message (optional)', evo_consent: 'I agree that Vornetic uses these details to answer my request.', evo_privacy: 'Privacy policy',
+    evo_send: 'Send request', evo_nocharge: 'Nothing is charged and nothing is reserved when you send a request.',
+    evo_sent_title: 'Request sent', evo_sent_ref: 'Your reference', evo_sent_next: 'We will contact you at {email} or by phone.', evo_sent_nomail: 'Our confirmation e-mail is switched off at the moment: please keep your reference.',
+    evo_done_measure: 'We will contact you to arrange a measurement.', evo_another: 'Send another request',
+    evo_tpl_title: 'Vehicles we have templates for', evo_tpl_pending: '{brand}: templates for some models; we are still confirming which ones.',
+    evo_tpl_note: 'A template covers only what is listed: we do not assume it fits other years, body types, seating arrangements or wheelbases.',
+    err_evo_vehicle: "Write your vehicle's brand and model.", err_evo_year: 'Write the year with 4 digits, for example 2019.', err_evo_option: 'Choose the type of vehicle, the set and the material.',
+    err_evo_config: 'Tell us the configuration of your vehicle.', err_evo_contact: 'Write your name.', err_evo_email: 'Write a valid email address.',
+    err_evo_phone: 'Write a phone number we can call (9 to 15 digits).', err_evo_consent: 'Please accept that we use your details to answer this request.',
+    err_evo_municipality: 'Write your municipality.', err_evo_zip: 'Write a 5-digit postcode.',
+    err_evo_out_of_area: 'We have no template for this vehicle and we only measure in person in the Madrid area, so we cannot take this request. Write to us if you think we may have a template for it.',
     please_choose: 'Please choose', sold_out: 'Sold out', tax_incl: 'VAT included', not_available: 'Not available in this combination',
     cart: 'Cart', cart_empty: 'Your cart is empty.', keep_shopping: 'Continue shopping', remove: 'Remove',
     subtotal: 'Subtotal', shipping: 'Shipping', free: 'Free', total: 'Total', checkout: 'Checkout',
@@ -61,7 +92,7 @@ const T = {
     current_password: 'Current password', new_password: 'New password', save: 'Save', saved: 'Saved',
     no_orders: "You haven't placed any orders yet.", tracking: 'Tracking', placed_on: 'Placed on',
     hello: 'Hello', forgot: 'Forgot your password? Write to us and we will help you.',
-    car_saved_hint: 'We use your car to show you the right products and to fill in EVO orders.',
+    car_saved_hint: 'We use your car to show you the right bulbs.',
     err_email_taken: 'There is already an account with this email.', err_bad_login: 'Wrong email or password.',
     err_password_short: 'The password must have at least 8 characters.', err_bad_password: 'The current password is not correct.',
     err_email: 'Please enter a valid email.', err_name: 'Please enter your name.',
@@ -112,6 +143,7 @@ const T = {
   es: {
     site_title: 'Vornetic — Bombillas xenón, LED y alfombrillas para coche',   // = the title the server sends for "/"
     nav_car: 'Buscar por coche', nav_xenon: 'Xenón', nav_led: 'LED', nav_mats: 'Alfombrillas', nav_home: 'Inicio',
+    hero_evo: 'Solicitar alfombrillas EVO a medida', hero_all: 'Ver todos los productos',
     hero_title: 'Iluminación y alfombrillas para tu coche',
     hero_lead: 'Bombillas xenón y LED, alfombrillas universales y alfombrillas EVO a medida. Enviamos desde España.',
     finder_title: 'Busca tu coche', brand: 'Marca', model: 'Modelo', gen: 'Generación', year: 'Año',
@@ -132,8 +164,38 @@ const T = {
     veh_title: 'Tu vehículo', veh_note: 'Escribe tú mismo la marca, el modelo y el año de tu vehículo, tal como figuran en su documentación. Con eso tenemos la medida exacta. La imagen 3D solo muestra el tipo de vehículo.',
     veh_ph_brand: 'p. ej. Seat', veh_ph_model: 'p. ej. León', veh_ph_year: 'p. ej. 2019',
     veh_missing: 'Escribe la marca, el modelo y el año de tu vehículo.', veh_year_bad: 'Escribe el año con 4 cifras, por ejemplo 2019.',
-    v3d_3d: '3D', v3d_top: 'Vista desde arriba', v3d_hint: 'Arrastra para girarlo', v3d_alt: 'Ilustración 3D', v3d_pick: 'elige el tipo de vehículo',
-    v3d_note: 'Imagen ilustrativa del tipo de vehículo y de las alfombrillas de tu juego. No es tu modelo exacto.',
+    v3d_3d: '3D', v3d_rear: 'Vista trasera', v3d_top: 'Vista desde arriba', v3d_hint: 'Arrastra para girarlo', v3d_alt: 'Ilustración 3D', v3d_pick: 'elige el tipo de vehículo',
+    v3d_note: 'Imagen ilustrativa: muestra un tipo de vehículo y la cobertura propuesta. No es un escaneo ni la forma o las medidas exactas de tu vehículo: el real lo medimos nosotros.',
+    v3d_modes: 'Qué muestra la imagen', v3d_mode_vehicle: 'Vehículo', v3d_mode_luggage: 'Maletero', v3d_mode_load: 'Zona de carga',
+    v3d_cap_luggage: 'Maletero de un turismo, detrás de los asientos traseros.', v3d_cap_cargo: 'Suelo de carga de una furgoneta comercial vacía, detrás de la cabina.',
+    v3d_cap_kombi: 'Parte trasera de una furgoneta de pasajeros (Kombi): las filas de asientos ocupan parte de la longitud.', v3d_cap_crew: 'Parte trasera de una furgoneta doble cabina: la segunda fila ocupa parte de la longitud.',
+    v3d_cap_selected: 'La cobertura oscura es lo que has elegido.', v3d_cap_preview_car: 'El contorno tenue es la alfombra de maletero, que no está en el juego que has elegido.',
+    v3d_cap_preview_van: 'Solo una vista previa: el suelo de la zona de carga se presupuesta con el modelo y la longitud exactos y no se pide online. Marca la casilla para pedir presupuesto.',
+    v3d_lbl_rear: 'Trasera', v3d_lbl_seats: 'Asientos', v3d_lbl_bulkhead: 'Mampara', v3d_lbl_coverage: 'Cobertura propuesta',
+    evo_ref_price: 'Precio de lista. Confirmamos el precio final cuando hayamos comprobado tu vehículo.',
+    evo_how_title: 'Cómo funciona.', evo_how: 'Es una solicitud, no un pedido. Eliges las alfombrillas y nos dices tu vehículo; comprobamos que podemos fabricarlas y te respondemos. No se cobra nada ni se reserva stock al enviarla.',
+    evo_pick: 'Elige…', evo_unknown: 'No lo sé',
+    evo_cfg_title: 'Configuración', evo_layout: 'Configuración de la furgoneta', evo_layout_cargo: 'Furgón de carga: zona de carga vacía', evo_layout_kombi: 'Furgoneta de pasajeros (Kombi) con asientos traseros', evo_layout_crew: 'Doble cabina: segunda fila de asientos, zona de carga detrás',
+    evo_rows: 'Filas de asientos (incluida la delantera)', evo_wheelbase: 'Longitud / distancia entre ejes', evo_roof: 'Altura del techo', evo_seats: 'Plazas', evo_seats_5: '5 plazas', evo_seats_7: '7 plazas (tercera fila)',
+    evo_cargo: 'Pedir también presupuesto del suelo de la zona de carga', evo_cargo_note: 'El suelo de la zona de carga se presupuesta con el modelo y la longitud exactos. No se pide online: respondemos tu solicitud con un presupuesto.',
+    evo_chk_candidate: 'Tu vehículo parece coincidir con una de nuestras plantillas ({label}). Aun así lo comprobamos nosotros antes de fabricar nada.',
+    evo_chk_pending: 'Estamos confirmando de qué modelos {brand} tenemos plantilla. Revisaremos el tuyo y te responderemos.',
+    evo_chk_none: 'No tenemos plantilla para este vehículo. Habría que medirlo en persona, y solo lo hacemos en la zona de Madrid. No podemos prometer la fabricación de estas alfombrillas antes de medirlo.',
+    evo_chk_none_known: 'Tenemos plantilla de {label}, pero no para tu {diff}: no damos por hecho que valga para otros años, carrocerías, disposiciones de asientos o distancias entre ejes. Habría que medir tu vehículo en persona, y solo lo hacemos en la zona de Madrid.',
+    evo_diff_year: 'año', evo_diff_body: 'tipo de vehículo', evo_diff_wheelbase: 'longitud', evo_diff_roof: 'altura de techo', evo_diff_layout: 'configuración',
+    evo_measure_title: 'Medición en persona (solo zona de Madrid)', evo_measure_note: 'Solo podemos medir un vehículo en persona en la zona de Madrid (códigos postales que empiezan por {zip}). Dinos dónde está.',
+    evo_municipality: 'Municipio', evo_zip: 'Código postal',
+    evo_contact_title: 'Tus datos de contacto', evo_message: 'Mensaje (opcional)', evo_consent: 'Acepto que Vornetic use estos datos para responder a mi solicitud.', evo_privacy: 'Política de privacidad',
+    evo_send: 'Enviar solicitud', evo_nocharge: 'No se cobra nada ni se reserva nada al enviar una solicitud.',
+    evo_sent_title: 'Solicitud enviada', evo_sent_ref: 'Tu referencia', evo_sent_next: 'Te escribiremos a {email} o te llamaremos.', evo_sent_nomail: 'Nuestro email de confirmación está desactivado ahora mismo: guarda tu referencia.',
+    evo_done_measure: 'Nos pondremos en contacto contigo para acordar una medición.', evo_another: 'Enviar otra solicitud',
+    evo_tpl_title: 'Vehículos para los que tenemos plantilla', evo_tpl_pending: '{brand}: plantillas de algunos modelos; estamos confirmando cuáles.',
+    evo_tpl_note: 'Una plantilla cubre solo lo que figura: no damos por hecho que valga para otros años, carrocerías, disposiciones de asientos o distancias entre ejes.',
+    err_evo_vehicle: 'Escribe la marca y el modelo de tu vehículo.', err_evo_year: 'Escribe el año con 4 cifras, por ejemplo 2019.', err_evo_option: 'Elige el tipo de vehículo, el juego y el material.',
+    err_evo_config: 'Cuéntanos la configuración de tu vehículo.', err_evo_contact: 'Escribe tu nombre.', err_evo_email: 'Escribe un email válido.',
+    err_evo_phone: 'Escribe un teléfono al que podamos llamarte (de 9 a 15 cifras).', err_evo_consent: 'Acepta que usemos tus datos para responder a esta solicitud.',
+    err_evo_municipality: 'Escribe tu municipio.', err_evo_zip: 'Escribe un código postal de 5 cifras.',
+    err_evo_out_of_area: 'No tenemos plantilla para este vehículo y solo medimos en persona en la zona de Madrid, así que no podemos aceptar esta solicitud. Escríbenos si crees que podríamos tener plantilla para él.',
     please_choose: 'Por favor, elige', sold_out: 'Agotado', tax_incl: 'IVA incluido', not_available: 'No disponible en esta combinación',
     cart: 'Carrito', cart_empty: 'Tu carrito está vacío.', keep_shopping: 'Seguir comprando', remove: 'Eliminar',
     subtotal: 'Subtotal', shipping: 'Envío', free: 'Gratis', total: 'Total', checkout: 'Finalizar compra',
@@ -166,7 +228,7 @@ const T = {
     current_password: 'Contraseña actual', new_password: 'Nueva contraseña', save: 'Guardar', saved: 'Guardado',
     no_orders: 'Todavía no has hecho ningún pedido.', tracking: 'Seguimiento', placed_on: 'Fecha',
     hello: 'Hola', forgot: '¿Has olvidado tu contraseña? Escríbenos y te ayudamos.',
-    car_saved_hint: 'Usamos tu coche para mostrarte los productos adecuados y rellenar los pedidos EVO.',
+    car_saved_hint: 'Usamos tu coche para mostrarte las bombillas adecuadas.',
     err_email_taken: 'Ya existe una cuenta con este email.', err_bad_login: 'Email o contraseña incorrectos.',
     err_password_short: 'La contraseña debe tener al menos 8 caracteres.', err_bad_password: 'La contraseña actual no es correcta.',
     err_email: 'Introduce un email válido.', err_name: 'Introduce tu nombre.',
@@ -450,6 +512,13 @@ function go(path, replace) {
   render();
 }
 document.addEventListener('click', e => {
+  // a link to a place on the same page (the address bar's #fragment would re-draw the page: see popstate below)
+  const to = e.target.closest('a[data-scroll]');
+  if (to && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+    e.preventDefault();
+    document.getElementById(to.dataset.scroll)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
   const a = e.target.closest('a[data-link]');
   if (!a || e.metaKey || e.ctrlKey || e.shiftKey || a.target) return;
   e.preventDefault();
@@ -654,27 +723,22 @@ function trustHtml() {
   const sub = k => k === 'trust4' ? paid : t(k + 's');
   return `<div class="trust">${items.map(([i, k]) => `<div>${i}<p style="margin:0"><b>${esc(title(k))}</b><span>${esc(sub(k))}</span></p></div>`).join('')}</div>`;
 }
-function myCarBar(c) {
-  return `<div class="mycar"><div><span class="muted">${esc(t('my_car'))}:</span> <b>${esc(myCar.label(c))}</b></div>
-    <div><a class="btn sm" href="/car" data-link>${esc(t('show'))}</a> <button class="chip-btn" id="carChange">${esc(t('change'))}</button></div></div>`;
-}
-function bindCarArea() {
-  if ($('#carSel')) bindFinder();
-  $('#carChange')?.addEventListener('click', () => { myCar.clear(); rerenderInPlace(); });
-}
 
 /* ================= views ================= */
 async function viewHome() {
   setTitle('');
   const evo = PRODUCTS.filter(p => p.fitment === 'car');
   const rest = PRODUCTS.filter(p => p.fitment !== 'car').sort((a, b) => (a.status === 'soon') - (b.status === 'soon'));
-  const c = myCar.get();
   const catImage = cat => cat.image || PRODUCTS.find(p => p.category === cat.slug)?.image || '/img/favicon.png';
+  const evoOpen = evo.find(p => p.status === 'available');
   app.innerHTML = `
     <section class="hero"><div class="wrap hero-in">
       <h1>${esc(t('hero_title'))}</h1>
       <p class="lead">${esc(t('hero_lead'))}</p>
-      ${c ? myCarBar(c) : finderBox()}
+      <div class="hero-cta">
+        ${evoOpen ? `<a class="btn" href="/p/${esc(evoOpen.slug)}" data-link>${esc(t('hero_evo'))}</a>` : ''}
+        <a class="btn ${evoOpen ? 'ghost' : ''}" href="/#products" data-scroll="products">${esc(t('hero_all'))}</a>
+      </div>
     </div></section>
 
     <section class="wrap section">
@@ -686,13 +750,12 @@ async function viewHome() {
       </div>
     </section>
 
-    <section class="wrap section" style="padding-top:0">
+    <section class="wrap section" id="products" style="padding-top:0">
       <div class="section-head"><h2>${esc(t('all_products'))}</h2></div>
       ${gridHtml([...evo, ...rest])}
     </section>
 
     <section class="wrap section" style="padding-top:0">${trustHtml()}</section>`;
-  bindCarArea();
 }
 
 async function viewCategory(slug) {
@@ -733,8 +796,6 @@ async function viewCar() {
   $('#carChange').addEventListener('click', () => { myCar.clear(); rerenderInPlace(); });
 }
 
-// The drawing that stands in for a photo of the EVO mats (the 3D picture replaces it on the product page)
-const EVO_DRAWING = '/img/p-mat-evo.svg';
 // Swipeable gallery (photos + videos). Returns { show(list) }.
 function mountGallery(root, name) {
   let current = '';
@@ -830,82 +891,56 @@ function pricesHtml(p) {
     ${extra.tables.length && CONFIG.whatsapp ? `<a class="btn ghost sm" href="${waLink(`${L(p.name)} — ${t('prices_ask_msg')}`)}" target="_blank" rel="noopener">${esc(t('prices_ask'))}</a>` : ''}`;
 }
 
-async function viewProduct(slug) {
-  const id = renderId;
-  const p = await api('/api/products/' + encodeURIComponent(slug));
-  if (stale(id)) return;
-  setTitle(L(p.name));
-  const cat = catBySlug(p.category);
-  const soon = p.status === 'soon';
-  const canBuy = !soon && p.in_stock;
-  const prices = pricesHtml(p);
-  const sel = {};
-  const madeToMeasure = p.fitment === 'car';           // EVO mats: type of vehicle chosen, the vehicle itself typed
-  let qty = 1;
-  document.body.classList.add('has-buybar');
-
-  app.innerHTML = `<div class="wrap">
-    <div class="crumbs"><a href="/" data-link>${esc(t('nav_home'))}</a> / ${cat ? `<a href="/c/${esc(cat.slug)}" data-link>${esc(L(cat.name))}</a>` : ''}</div>
-    <div class="pdp${madeToMeasure ? ' mtm' : ''}">
-      <div class="gallery" id="gallery"></div>
-      <div class="pinfo">
-        <span class="muted small">${esc(madeToMeasure ? t('made_for') : L(cat?.name))}</span>
-        <h1 class="ptitle">${esc(L(p.name))}</h1>
-        <button type="button" class="rv-sum" id="rvSum" hidden></button>
-        <div class="price" id="price"></div>
-        ${prices ? `<p class="see-prices"><button type="button" class="link" id="seePrices">${esc(t('see_prices'))}</button></p>` : ''}
-        ${soon ? `<div class="notice soon-note">${esc(t('soon_note'))}${CONFIG.whatsapp ? ` <a class="link" href="${waLink(`${t('notify_msg')}: ${L(p.name)}`)}" target="_blank" rel="noopener">${esc(t('notify_wa'))}</a>` : ''}</div>` : ''}
-        ${madeToMeasure ? '<div class="v3d-m" id="viewerM"></div>' : ''}
-        ${p.options.map(o => `<div class="opt-group${o.values.length === 1 && !o.values[0].soon && !o.values[0].out ? ' one' : ''}" data-o="${esc(o.id)}">
-          <span>${esc(L(o))}: <b data-chosen></b></span>
-          <div class="opts">${o.values.map(v => `<button type="button" class="opt" data-v="${esc(v.id)}">${esc(L(v))}${v.soon
-            ? `<small>${esc(t('soon_short'))}</small>` : v.out ? `<small>${esc(t('opt_out'))}</small>` : ''}</button>`).join('')}</div>
-        </div>`).join('')}
-        ${madeToMeasure ? `<div class="carbox" id="vehBox"><h3>${ICON.car} ${esc(t('veh_title'))}</h3>
-          <p class="muted small" style="margin:0 0 12px">${esc(t('veh_note'))}</p>
-          <div class="veh-row">
-            <label class="f"><span>${esc(t('brand'))}</span><input class="in" id="vBrand" maxlength="40" autocomplete="off" placeholder="${esc(t('veh_ph_brand'))}"></label>
-            <label class="f"><span>${esc(t('model'))}</span><input class="in" id="vModel" maxlength="60" autocomplete="off" placeholder="${esc(t('veh_ph_model'))}"></label>
-            <label class="f"><span>${esc(t('year'))}</span><input class="in" id="vYear" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="${esc(t('veh_ph_year'))}"></label>
-          </div></div>` : ''}
-        <div id="pErr"></div>
-        <div class="buy-row">
-          <div class="qty"><button type="button" data-q="-1" aria-label="-">−</button><input id="qty" type="number" min="1" max="10" value="1" aria-label="${esc(t('qty'))}"><button type="button" data-q="1" aria-label="+">+</button></div>
-          <button class="btn" id="addBtn" ${canBuy ? '' : 'disabled'}>${esc(soon ? t('soon') : p.in_stock ? t('add') : t('sold_out'))}</button>
-        </div>
-        <p class="muted small">${esc(t('tax_incl'))} · ${esc(p.fitment === 'car' ? t('made_days') : t('trust1s'))}</p>
-        ${prices ? `<div class="ptabs" role="tablist">
-          <button type="button" class="ptab on" role="tab" id="tabDesc" aria-selected="true" aria-controls="paneDesc" data-pane="paneDesc">${esc(t('tab_desc'))}</button>
-          <button type="button" class="ptab" role="tab" id="tabPrices" aria-selected="false" aria-controls="panePrices" data-pane="panePrices">${esc(t('tab_prices'))}</button>
-        </div>` : ''}
-        <div class="desc${prices ? ' in-tabs' : ''}" id="paneDesc"${prices ? ' role="tabpanel" aria-labelledby="tabDesc"' : ''}>${esc(L(p.desc))}</div>
-        ${prices ? `<div class="prices" id="panePrices" role="tabpanel" aria-labelledby="tabPrices" hidden>${prices}</div>` : ''}
-        <details class="safety">
-          <summary>${esc(t('safety_title'))}</summary>
-          ${p.manufacturer ? `<p><b>${esc(t('manufacturer'))}</b><br>${esc(p.manufacturer)}</p>` : ''}
-          ${p.eu_responsible ? `<p><b>${esc(t('eu_resp'))}</b><br>${esc(p.eu_responsible)}</p>` : ''}
-          <p><b>${esc(t('distributor'))}</b><br>${esc(CONFIG.company.name)}${CONFIG.company.holder ? ` (${esc(CONFIG.company.holder)})` : ''}${CONFIG.company.address ? ', ' + esc(CONFIG.company.address) : ''} · ${esc(CONFIG.email)}</p>
-          ${L(p.safety) ? `<p style="white-space:pre-line">${esc(L(p.safety))}</p>` : ''}
-        </details>
-      </div>
-    </div>
-    <section class="reviews" id="reviews" aria-labelledby="rvTitle"></section>
-  </div>`;
-
-  // Made-to-measure: a 3D picture of the chosen type of vehicle (photos, if any were added, go under it).
-  // It is drawn twice: in the gallery column, and above the options on a phone (CSS shows one of them), so the
-  // picture and the choices are on the screen together.
-  let viewers = [], photos = null, viewerKey = '';
-  if (madeToMeasure && window.Vehicle3D) {
-    $('#gallery').innerHTML = '<div id="viewer"></div><div id="photos"></div>';
-    const text = { view3d: t('v3d_3d'), viewTop: t('v3d_top'), hint: t('v3d_hint'), note: t('v3d_note') };
-    viewers = [Vehicle3D.mount($('#viewer'), { text }), Vehicle3D.mount($('#viewerM'), { text })];
-    photos = mountGallery($('#photos'), L(p.name));
-  }
-  const gallery = viewers.length ? null : mountGallery($('#gallery'), L(p.name));
-  mountReviews(p, id);
-
-  // Description / Prices tabs ("See all prices" under the price opens the second one)
+// The option groups of a product page: one row of buttons per option
+const optionGroupsHtml = p => p.options.map(o => `<div class="opt-group${o.values.length === 1 && !o.values[0].soon && !o.values[0].out ? ' one' : ''}" data-o="${esc(o.id)}">
+  <span>${esc(L(o))}: <b data-chosen></b></span>
+  <div class="opts">${o.values.map(v => `<button type="button" class="opt" data-v="${esc(v.id)}">${esc(L(v))}${v.soon
+    ? `<small>${esc(t('soon_short'))}</small>` : v.out ? `<small>${esc(t('opt_out'))}</small>` : ''}</button>`).join('')}</div>
+</div>`).join('');
+// Mark the buttons of the option groups for the choices made so far (see optionView)
+function paintOptions(p, sel, madeToMeasure) {
+  const view = optionView(p, sel, madeToMeasure);
+  $$('.opt-group').forEach((g, gi) => {
+    const oid = g.dataset.o;
+    g.hidden = view[gi].hidden;
+    $$('.opt', g).forEach(b => {
+      const { state: st, hidden } = view[gi].values[b.dataset.v];
+      b.hidden = hidden;
+      b.classList.toggle('on', sel[oid] === b.dataset.v);
+      b.classList.toggle('is-soon', st === 'soon');
+      b.classList.toggle('is-out', st === 'out');
+      b.disabled = st !== 'ok';
+    });
+    $('[data-chosen]', g).textContent = sel[oid] ? L(valOf(p, oid, sel[oid])) : '';
+  });
+}
+// A click on an option button: the choice is made and the other choices that no longer fit it are dropped
+function bindOptions(p, sel, after) {
+  $$('.opt-group').forEach(g => g.addEventListener('click', e => {
+    const b = e.target.closest('.opt'); if (!b || b.disabled) return;
+    sel[g.dataset.o] = b.dataset.v;
+    p.options.forEach(o => { if (o.id !== g.dataset.o && sel[o.id] && valueState(p, sel, o.id, sel[o.id]) !== 'ok') delete sel[o.id]; });
+    after();
+  }));
+}
+// Description, price tabs and safety information: the lower part of a product page
+function pdpTail(p, prices) {
+  return `${prices ? `<div class="ptabs" role="tablist">
+      <button type="button" class="ptab on" role="tab" id="tabDesc" aria-selected="true" aria-controls="paneDesc" data-pane="paneDesc">${esc(t('tab_desc'))}</button>
+      <button type="button" class="ptab" role="tab" id="tabPrices" aria-selected="false" aria-controls="panePrices" data-pane="panePrices">${esc(t('tab_prices'))}</button>
+    </div>` : ''}
+    <div class="desc${prices ? ' in-tabs' : ''}" id="paneDesc"${prices ? ' role="tabpanel" aria-labelledby="tabDesc"' : ''}>${esc(L(p.desc))}</div>
+    ${prices ? `<div class="prices" id="panePrices" role="tabpanel" aria-labelledby="tabPrices" hidden>${prices}</div>` : ''}
+    <details class="safety">
+      <summary>${esc(t('safety_title'))}</summary>
+      ${p.manufacturer ? `<p><b>${esc(t('manufacturer'))}</b><br>${esc(p.manufacturer)}</p>` : ''}
+      ${p.eu_responsible ? `<p><b>${esc(t('eu_resp'))}</b><br>${esc(p.eu_responsible)}</p>` : ''}
+      <p><b>${esc(t('distributor'))}</b><br>${esc(CONFIG.company.name)}${CONFIG.company.holder ? ` (${esc(CONFIG.company.holder)})` : ''}${CONFIG.company.address ? ', ' + esc(CONFIG.company.address) : ''} · ${esc(CONFIG.email)}</p>
+      ${L(p.safety) ? `<p style="white-space:pre-line">${esc(L(p.safety))}</p>` : ''}
+    </details>`;
+}
+// Description / Prices tabs ("See all prices" under the price opens the second one)
+function bindPriceTabs() {
   const showPane = pane => $$('.ptab').forEach(b => {
     const on = b.dataset.pane === pane;
     b.classList.toggle('on', on);
@@ -914,6 +949,49 @@ async function viewProduct(slug) {
   });
   $$('.ptab').forEach(b => b.addEventListener('click', () => showPane(b.dataset.pane)));
   $('#seePrices')?.addEventListener('click', () => { showPane('panePrices'); $('.ptabs').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
+}
+
+async function viewProduct(slug) {
+  const id = renderId;
+  const p = await api('/api/products/' + encodeURIComponent(slug));
+  if (stale(id)) return;
+  if (p.fitment === 'car') return viewEvo(p, id);              // made to measure: a request, not a purchase
+  setTitle(L(p.name));
+  const cat = catBySlug(p.category);
+  const soon = p.status === 'soon';
+  const canBuy = !soon && p.in_stock;
+  const prices = pricesHtml(p);
+  const sel = {};
+  let qty = 1;
+  document.body.classList.add('has-buybar');
+
+  app.innerHTML = `<div class="wrap">
+    <div class="crumbs"><a href="/" data-link>${esc(t('nav_home'))}</a> / ${cat ? `<a href="/c/${esc(cat.slug)}" data-link>${esc(L(cat.name))}</a>` : ''}</div>
+    <div class="pdp">
+      <div class="gallery" id="gallery"></div>
+      <div class="pinfo">
+        <span class="muted small">${esc(L(cat?.name))}</span>
+        <h1 class="ptitle">${esc(L(p.name))}</h1>
+        <button type="button" class="rv-sum" id="rvSum" hidden></button>
+        <div class="price" id="price"></div>
+        ${prices ? `<p class="see-prices"><button type="button" class="link" id="seePrices">${esc(t('see_prices'))}</button></p>` : ''}
+        ${soon ? `<div class="notice soon-note">${esc(t('soon_note'))}${CONFIG.whatsapp ? ` <a class="link" href="${waLink(`${t('notify_msg')}: ${L(p.name)}`)}" target="_blank" rel="noopener">${esc(t('notify_wa'))}</a>` : ''}</div>` : ''}
+        ${optionGroupsHtml(p)}
+        <div id="pErr"></div>
+        <div class="buy-row">
+          <div class="qty"><button type="button" data-q="-1" aria-label="-">−</button><input id="qty" type="number" min="1" max="10" value="1" aria-label="${esc(t('qty'))}"><button type="button" data-q="1" aria-label="+">+</button></div>
+          <button class="btn" id="addBtn" ${canBuy ? '' : 'disabled'}>${esc(soon ? t('soon') : p.in_stock ? t('add') : t('sold_out'))}</button>
+        </div>
+        <p class="muted small">${esc(t('tax_incl'))} · ${esc(t('trust1s'))}</p>
+        ${pdpTail(p, prices)}
+      </div>
+    </div>
+    <section class="reviews" id="reviews" aria-labelledby="rvTitle"></section>
+  </div>`;
+
+  const gallery = mountGallery($('#gallery'), L(p.name));
+  mountReviews(p, id);
+  bindPriceTabs();
 
   // Preselect: options with one value, and ?o=H7 from the bulb finder
   p.options.forEach(o => { if (o.values.length === 1 && !o.values[0].soon) sel[o.id] = o.values[0].id; });
@@ -922,7 +1000,7 @@ async function viewProduct(slug) {
   if (preHit) sel[preHit[0]] = preHit[1];
 
   // "Your BMW 3 Series E90: Xenon D1S" when the saved car uses a bulb this product has
-  const myBulbs = p.fitment !== 'car' ? bulbsFor(myCar.get()) : null;
+  const myBulbs = bulbsFor(myCar.get());
   const fits = myBulbs ? bulbRows(myBulbs).filter(([, code]) => optionFor(p, code)) : [];
   if (fits.length) $('#price').insertAdjacentHTML('afterend', `<p class="notice ok" style="margin:-8px 0 16px">${esc(t('your_car_uses')
     .replace('{car}', myCar.label(myCar.get())).replace('{list}', fits.map(([l, code]) => `${l} ${code}`).join(' · ')))}</p>`);
@@ -932,42 +1010,11 @@ async function viewProduct(slug) {
     const complete = isComplete(p, sel);
     $('#price').innerHTML = unit == null ? `<span class="muted" style="font-size:16px">${esc(t('not_available'))}</span>`
       : `${!complete && p.from ? `<span class="from">${esc(t('from'))}</span>` : ''}${eur(unit)}${p.old_price_cents && complete && unit === p.base_cents ? `<span class="old">${eur(p.old_price_cents)}</span>` : ''}`;
-    const view = optionView(p, sel, madeToMeasure);
-    $$('.opt-group').forEach((g, gi) => {
-      const oid = g.dataset.o;
-      g.hidden = view[gi].hidden;
-      $$('.opt', g).forEach(b => {
-        const { state: st, hidden } = view[gi].values[b.dataset.v];
-        b.hidden = hidden;
-        b.classList.toggle('on', sel[oid] === b.dataset.v);
-        b.classList.toggle('is-soon', st === 'soon');
-        b.classList.toggle('is-out', st === 'out');
-        b.disabled = st !== 'ok';
-      });
-      $('[data-chosen]', g).textContent = sel[oid] ? L(valOf(p, oid, sel[oid])) : '';
-    });
-    if (viewers.length) {
-      const key = `${sel.veh || ''}|${sel.set || ''}`;
-      if (key !== viewerKey) {
-        viewerKey = key;
-        const vv = sel.veh && valOf(p, 'veh', sel.veh), ss = sel.set && valOf(p, 'set', sel.set);
-        viewers.forEach(v => v.set({ vehicle: sel.veh, set: sel.set,
-          label: `${t('v3d_alt')}: ${vv ? [L(vv), ss && L(ss)].filter(Boolean).join(' · ') : t('v3d_pick')}` }));
-      }
-      const real = mediaFor(p, sel).filter(m => m.src !== EVO_DRAWING);
-      if (real.length) photos.show(real); else $('#photos').replaceChildren();
-    } else gallery.show(mediaFor(p, sel));
+    paintOptions(p, sel, false);
+    gallery.show(mediaFor(p, sel));
   };
   refresh();
-
-  $$('.opt-group').forEach(g => g.addEventListener('click', e => {
-    const b = e.target.closest('.opt'); if (!b || b.disabled) return;
-    const oid = g.dataset.o;
-    sel[oid] = b.dataset.v;
-    // drop other choices that are no longer possible with this one
-    p.options.forEach(o => { if (o.id !== oid && sel[o.id] && valueState(p, sel, o.id, sel[o.id]) !== 'ok') delete sel[o.id]; });
-    $('#pErr').innerHTML = ''; refresh();
-  }));
+  bindOptions(p, sel, () => { $('#pErr').innerHTML = ''; refresh(); });
   const qIn = $('#qty');
   $$('[data-q]').forEach(b => b.addEventListener('click', () => { qty = Math.max(1, Math.min(10, (+qIn.value || 1) + +b.dataset.q)); qIn.value = qty; }));
   qIn.addEventListener('change', () => { qty = Math.max(1, Math.min(10, +qIn.value || 1)); qIn.value = qty; });
@@ -977,18 +1024,238 @@ async function viewProduct(slug) {
     const missing = p.options.find(o => !sel[o.id]);
     if (missing) return err(`${t('please_choose')}: ${L(missing)}`);
     if (unitPrice(p, sel) == null) return err(t('not_available'));
-    let car = null;
-    if (madeToMeasure) {
-      // the vehicle is typed by the customer; the server checks it again
-      const one = id => $(id).value.trim().replace(/\s+/g, ' ');
-      const v = { brand: one('#vBrand'), model: one('#vModel'), year: one('#vYear') };
-      const empty = ['#vBrand', '#vModel', '#vYear'].find(id => !one(id));
-      if (empty) { $(empty).focus(); return err(t('veh_missing')); }
-      if (!/^\d{4}$/.test(v.year) || +v.year < 1950 || +v.year > new Date().getFullYear() + 1) { $('#vYear').focus(); return err(t('veh_year_bad')); }
-      car = { brand: v.brand, model: v.model, year: +v.year };
-    }
-    cart.add(p, qty, { ...sel }, car);
+    cart.add(p, qty, { ...sel }, null);
     toast(`${esc(t('added'))} <a href="/cart" data-link>${esc(t('view_cart'))} →</a>`);
+  });
+}
+
+/* ================= EVO: made-to-measure mats are requested, not bought ================= */
+// The customer chooses the type of vehicle, the set and the material, types the vehicle (brand, model, year), tells
+// the configuration where it matters and sends a REQUEST. Nothing is charged, no stock is held, nothing goes to the
+// payment page: the shop checks that the mats fit and answers. The server decides what a request means (a template
+// seems to cover it / templates of the brand are being confirmed / nothing covers it: measured in person, Madrid area
+// only) and refuses what it cannot take; this page only explains it while the form is filled in (see evo.js, server.js).
+const EVO_DRAWING = '/img/p-mat-evo.svg';          // the drawing that stood in for a photo of the mats
+const isVanBody = id => /^van/.test(id || '');
+async function viewEvo(p, id) {
+  setTitle(L(p.name));
+  const cat = catBySlug(p.category);
+  const open = p.status === 'available';
+  const sel = {};
+  const cfg = { layout: '', rows: '', wheelbase: '', roof: '', seats: '', cargo: false };
+  const prices = pricesHtml(p);
+  const tpl = await api('/api/evo/templates').catch(() => ({ confirmed: [], pending_brands: [] }));
+  if (stale(id)) return;
+  let check = null, checkTimer = 0, checkSeq = 0, viewerKey = '';
+  const pick = (name, list, cur, labelOf) => `<select class="in" data-c="${name}"><option value="">${esc(t('evo_pick'))}</option>${list.map(v => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(labelOf(v))}</option>`).join('')}</select>`;
+  const unknown = v => (v === 'unknown' ? t('evo_unknown') : v);
+  const bodyLabel = b => { const v = valOf(p, 'veh', b); return v ? L(v) : ''; };
+
+  app.innerHTML = `<div class="wrap">
+    <div class="crumbs"><a href="/" data-link>${esc(t('nav_home'))}</a> / ${cat ? `<a href="/c/${esc(cat.slug)}" data-link>${esc(L(cat.name))}</a>` : ''}</div>
+    <div class="pdp mtm">
+      <div class="gallery" id="gallery"><div id="viewer"></div><div id="photos"></div></div>
+      <div class="pinfo">
+        <span class="muted small">${esc(t('made_for'))}</span>
+        <h1 class="ptitle">${esc(L(p.name))}</h1>
+        <div class="price" id="price"></div>
+        <p class="muted small" style="margin:-10px 0 14px">${esc(t('evo_ref_price'))}</p>
+        ${prices ? `<p class="see-prices"><button type="button" class="link" id="seePrices">${esc(t('see_prices'))}</button></p>` : ''}
+        ${open ? `<div class="notice evo-how"><b>${esc(t('evo_how_title'))}</b> ${esc(t('evo_how'))}</div>`
+          : `<div class="notice soon-note">${esc(t('soon_note'))}</div>`}
+        <div class="v3d-m" id="viewerM"></div>
+        ${optionGroupsHtml(p)}
+        <div id="evoCfg"></div>
+        <div class="carbox" id="vehBox"><h3>${ICON.car} ${esc(t('veh_title'))}</h3>
+          <p class="muted small" style="margin:0 0 12px">${esc(t('veh_note'))}</p>
+          <div class="veh-row">
+            <label class="f"><span>${esc(t('brand'))}</span><input class="in" id="vBrand" maxlength="40" autocomplete="off" placeholder="${esc(t('veh_ph_brand'))}"></label>
+            <label class="f"><span>${esc(t('model'))}</span><input class="in" id="vModel" maxlength="60" autocomplete="off" placeholder="${esc(t('veh_ph_model'))}"></label>
+            <label class="f"><span>${esc(t('year'))}</span><input class="in" id="vYear" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="${esc(t('veh_ph_year'))}"></label>
+          </div>
+          <div id="evoCheck" role="status" aria-live="polite"></div>
+        </div>
+        <div class="carbox" id="evoMeasure" hidden><h3>${esc(t('evo_measure_title'))}</h3>
+          <p class="muted small" style="margin:0 0 12px" id="evoMeasureNote"></p>
+          <div class="grid2">
+            <label class="f"><span>${esc(t('evo_municipality'))}</span><input class="in" id="vMuni" maxlength="80" autocomplete="address-level2"></label>
+            <label class="f"><span>${esc(t('evo_zip'))}</span><input class="in" id="vZip" inputmode="numeric" maxlength="5" autocomplete="postal-code"></label>
+          </div>
+        </div>
+        <div class="carbox" id="evoContact"><h3>${esc(t('evo_contact_title'))}</h3>
+          <div class="grid2">
+            <label class="f"><span>${esc(t('full_name'))}</span><input class="in" id="cName" maxlength="120" autocomplete="name"></label>
+            <label class="f"><span>${esc(t('phone'))}</span><input class="in" id="cPhone" maxlength="25" inputmode="tel" autocomplete="tel"></label>
+          </div>
+          <label class="f"><span>${esc(t('email'))}</span><input class="in" id="cEmail" maxlength="160" type="email" autocomplete="email"></label>
+          <label class="f"><span>${esc(t('evo_message'))}</span><textarea class="in" id="cMsg" maxlength="1000" rows="3"></textarea></label>
+          <div class="hp" aria-hidden="true"><input id="cWebsite" tabindex="-1" autocomplete="off"></div>
+          <label class="chk" style="margin:0"><input type="checkbox" id="cConsent"> <span>${esc(t('evo_consent'))} <a class="link" href="/info/privacy" target="_blank" rel="noopener">${esc(t('evo_privacy'))}</a></span></label>
+        </div>
+        <div id="pErr"></div>
+        <button class="btn block" id="evoSend" ${open ? '' : 'disabled'}>${esc(open ? t('evo_send') : t('soon'))}</button>
+        <p class="muted small" style="margin-top:10px">${esc(t('evo_nocharge'))}</p>
+        ${pdpTail(p, prices)}
+        <details class="safety" id="evoTpl"><summary>${esc(t('evo_tpl_title'))}</summary>
+          <ul class="evo-tpl">${tpl.confirmed.map(x => `<li>${esc(x.label)}${bodyLabel(x.body) ? ` — ${esc(bodyLabel(x.body))}` : ''}${[x.wheelbase, x.roof, x.layout && t('evo_layout_' + x.layout)].filter(Boolean).map(v => `, ${esc(v)}`).join('')}</li>`).join('')}
+            ${tpl.pending_brands.map(b => `<li>${esc(t('evo_tpl_pending').replace('{brand}', b))}</li>`).join('')}</ul>
+          <p class="muted small">${esc(t('evo_tpl_note'))}</p>
+        </details>
+      </div>
+    </div>
+  </div>`;
+
+  // the 3D picture, drawn twice (gallery column / above the options on a phone: CSS shows one of them)
+  const vt = t;
+  const v3dText = { view3d: vt('v3d_3d'), viewRear: vt('v3d_rear'), viewTop: vt('v3d_top'), hint: vt('v3d_hint'), note: vt('v3d_note'), modes: vt('v3d_modes'),
+    modeVehicle: vt('v3d_mode_vehicle'), modeLuggage: vt('v3d_mode_luggage'), modeLoad: vt('v3d_mode_load'),
+    cap_luggage: vt('v3d_cap_luggage'), cap_cargo: vt('v3d_cap_cargo'), cap_kombi: vt('v3d_cap_kombi'), cap_crew: vt('v3d_cap_crew'),
+    capSelected: vt('v3d_cap_selected'), capPreviewCar: vt('v3d_cap_preview_car'), capPreviewVan: vt('v3d_cap_preview_van'),
+    lbl_rear: vt('v3d_lbl_rear'), lbl_seats: vt('v3d_lbl_seats'), lbl_bulkhead: vt('v3d_lbl_bulkhead'), lbl_coverage: vt('v3d_lbl_coverage') };
+  const viewers = window.Vehicle3D ? [Vehicle3D.mount($('#viewer'), { text: v3dText }), Vehicle3D.mount($('#viewerM'), { text: v3dText })] : [];
+  const photos = mountGallery($('#photos'), L(p.name));
+  bindPriceTabs();
+
+  const vehicleInput = () => ({ brand: $('#vBrand').value.trim().replace(/\s+/g, ' '), model: $('#vModel').value.trim().replace(/\s+/g, ' '), year: $('#vYear').value.trim() });
+  const yearOk = y => /^\d{4}$/.test(y) && +y >= 1950 && +y <= new Date().getFullYear() + 1;
+  const showErr = (m, focus) => { $('#pErr').innerHTML = `<p class="notice err">${esc(m)}</p>`; $('#pErr').scrollIntoView({ block: 'center', behavior: 'smooth' }); if (focus) $(focus)?.focus(); };
+
+  // what the typed vehicle means (the server's answer), in words
+  function drawCheck() {
+    const box = $('#evoCheck'), m = $('#evoMeasure');
+    if (!check) { box.innerHTML = ''; m.hidden = true; return; }
+    const why = check.reasons.filter(r => ['year', 'body', 'wheelbase', 'roof', 'layout'].includes(r)).map(r => t('evo_diff_' + r));
+    const text = check.kind === 'candidate' ? t('evo_chk_candidate').replace('{label}', check.label)
+      : check.kind === 'pending' ? t('evo_chk_pending').replace('{brand}', vehicleInput().brand)
+      : check.label ? t('evo_chk_none_known').replace('{label}', check.label).replace('{diff}', why.join(', ')) : t('evo_chk_none');
+    box.innerHTML = `<p class="notice ${check.kind === 'measurement' ? 'warn' : 'ok'}" style="margin:12px 0 0">${esc(text)}</p>`;
+    m.hidden = check.kind !== 'measurement';
+    if (!m.hidden) {
+      $('#evoMeasureNote').textContent = t('evo_measure_note').replace('{zip}', (CONFIG.evo_zip_prefixes || ['28']).join(', '));
+      const zip = $('#vZip').value.trim();
+      $('#evoMeasureWarn')?.remove();
+      if (zip.length === 5 && check.area_ok === false) m.insertAdjacentHTML('beforeend', `<p class="notice err" id="evoMeasureWarn" style="margin-top:4px">${esc(t('err_evo_out_of_area'))}</p>`);
+    }
+  }
+  function scheduleCheck() {
+    clearTimeout(checkTimer);
+    checkTimer = setTimeout(async () => {
+      const v = vehicleInput();
+      if (!v.brand || !v.model || !yearOk(v.year)) { check = null; drawCheck(); return; }
+      const seq = ++checkSeq;
+      try {
+        const r = await post('/api/evo/check', { vehicle: { ...v, year: +v.year }, veh: sel.veh || '', layout: cfg.layout, wheelbase: cfg.wheelbase, roof: cfg.roof, zip: $('#vZip').value.trim() });
+        if (seq !== checkSeq || stale(id)) return;
+        check = r.ok ? r : null;
+      } catch { check = null; }
+      drawCheck();
+    }, 350);
+  }
+
+  // the configuration that matters for the chosen type of vehicle
+  function drawCfg() {
+    const van = isVanBody(sel.veh), seats = sel.veh === 'suvbig' || sel.veh === 'mpv';
+    const box = $('#evoCfg');
+    if (!van && !seats) { box.innerHTML = ''; return; }
+    box.innerHTML = `<div class="carbox"><h3>${esc(t('evo_cfg_title'))}</h3>
+      ${van ? `<label class="f"><span>${esc(t('evo_layout'))}</span>${pick('layout', ['cargo', 'kombi', 'crew'], cfg.layout, v => t('evo_layout_' + v))}</label>
+        ${cfg.layout === 'kombi' ? `<label class="f"><span>${esc(t('evo_rows'))}</span>${pick('rows', ['2', '3'], cfg.rows, v => v)}</label>` : ''}
+        <div class="grid2">
+          <label class="f"><span>${esc(t('evo_wheelbase'))}</span>${pick('wheelbase', ['L1', 'L2', 'L3', 'L4', 'unknown'], cfg.wheelbase, unknown)}</label>
+          <label class="f"><span>${esc(t('evo_roof'))}</span>${pick('roof', ['H1', 'H2', 'H3', 'unknown'], cfg.roof, unknown)}</label>
+        </div>
+        <label class="chk" style="margin:0"><input type="checkbox" data-c="cargo" ${cfg.cargo ? 'checked' : ''}> <span>${esc(t('evo_cargo'))}</span></label>
+        <p class="muted small" style="margin:8px 0 0">${esc(t('evo_cargo_note'))}</p>`
+      : `<label class="f" style="margin:0"><span>${esc(t('evo_seats'))}</span>${pick('seats', ['5', '7'], cfg.seats, v => t('evo_seats_' + v))}</label>`}
+    </div>`;
+  }
+  $('#evoCfg').addEventListener('change', e => {
+    const c = e.target.dataset.c; if (!c) return;
+    cfg[c] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    if (c === 'layout' && cfg.layout !== 'kombi') cfg.rows = '';
+    if (c === 'seats' && cfg.seats === '5' && sel.set) sel.set = { set4r3: 'set4', packr3: 'pack' }[sel.set] || sel.set;   // a third row needs 7 seats
+    $('#pErr').innerHTML = '';
+    if (c === 'layout' || c === 'seats') drawCfg();
+    refresh(); scheduleCheck();
+    if (c === 'cargo' && cfg.cargo) viewers.forEach(v => v.setMode('rear'));    // show the floor that is being asked about
+  });
+
+  const refresh = () => {
+    const unit = unitPrice(p, sel), complete = isComplete(p, sel);
+    // the list price of the chosen set; the shop confirms the real one
+    $('#price').innerHTML = unit == null ? `<span class="muted" style="font-size:16px">${esc(t('not_available'))}</span>`
+      : `${!complete && p.from ? `<span class="from">${esc(t('from'))}</span>` : ''}${eur(unit)}`;
+    // choices that no longer apply are cleared: the configuration of a van does not stay on a car, nor the seats of a sedan
+    if (!isVanBody(sel.veh)) Object.assign(cfg, { layout: '', rows: '', wheelbase: '', roof: '', cargo: false });
+    if (!(sel.veh === 'suvbig' || sel.veh === 'mpv')) cfg.seats = '';
+    else if (['set4r3', 'packr3'].includes(sel.set)) cfg.seats = '7';
+    paintOptions(p, sel, true);
+    if (viewers.length) {
+      const key = [sel.veh, sel.set, cfg.layout, cfg.rows, cfg.wheelbase, cfg.roof, cfg.seats, cfg.cargo].join('|');
+      if (key !== viewerKey) {
+        viewerKey = key;
+        const vv = sel.veh && valOf(p, 'veh', sel.veh), ss = sel.set && valOf(p, 'set', sel.set);
+        viewers.forEach(v => v.set({ vehicle: sel.veh, set: sel.set, config: { ...cfg },
+          label: `${t('v3d_alt')}: ${vv ? [L(vv), ss && L(ss)].filter(Boolean).join(' · ') : t('v3d_pick')}` }));
+      }
+    }
+    const real = mediaFor(p, sel).filter(m => m.src !== EVO_DRAWING);
+    if (real.length) photos.show(real); else $('#photos').replaceChildren();
+  };
+  let lastVeh = '';
+  bindOptions(p, sel, () => {
+    $('#pErr').innerHTML = '';
+    refresh(); drawCfg();
+    if (sel.veh !== lastVeh) {                                     // another type of vehicle: look at it from outside again, check the typed one again
+      lastVeh = sel.veh;
+      viewers.forEach(v => v.setMode('vehicle'));
+      scheduleCheck();
+    }
+  });
+  refresh(); drawCfg();
+  ['#vBrand', '#vModel', '#vYear', '#vZip'].forEach(s => $(s).addEventListener('input', () => { $('#pErr').innerHTML = ''; scheduleCheck(); }));
+
+  // send the request; the server checks everything again
+  $('#evoSend').addEventListener('click', async () => {
+    $('#pErr').innerHTML = '';
+    const missing = p.options.find(o => !sel[o.id]);
+    if (missing) return showErr(`${t('please_choose')}: ${L(missing)}`);
+    const van = isVanBody(sel.veh);
+    if (van && (!cfg.layout || !cfg.wheelbase || !cfg.roof || (cfg.layout === 'kombi' && !cfg.rows))) return showErr(t('err_evo_config'), '#evoCfg select');
+    if ((sel.veh === 'suvbig' || sel.veh === 'mpv') && !cfg.seats) return showErr(t('err_evo_config'), '#evoCfg select');
+    const v = vehicleInput();
+    if (!v.brand || !v.model || !v.year) return showErr(t('veh_missing'), !v.brand ? '#vBrand' : !v.model ? '#vModel' : '#vYear');
+    if (!yearOk(v.year)) return showErr(t('veh_year_bad'), '#vYear');
+    const name = $('#cName').value.trim(), email = $('#cEmail').value.trim(), phone = $('#cPhone').value.trim();
+    if (!name) return showErr(t('err_evo_contact'), '#cName');
+    if (!/^\S+@\S+\.\S+$/.test(email)) return showErr(t('err_evo_email'), '#cEmail');
+    if (phone.replace(/\D/g, '').length < 9) return showErr(t('err_evo_phone'), '#cPhone');
+    const measuring = !$('#evoMeasure').hidden;
+    if (measuring && !$('#vMuni').value.trim()) return showErr(t('err_evo_municipality'), '#vMuni');
+    if (measuring && !/^\d{5}$/.test($('#vZip').value.trim())) return showErr(t('err_evo_zip'), '#vZip');
+    if (!$('#cConsent').checked) return showErr(t('err_evo_consent'), '#cConsent');
+    const btn = $('#evoSend');
+    btn.disabled = true;
+    try {
+      const r = await post('/api/evo/requests', {
+        product: p.slug, lang: LANG, vehicle: { ...v, year: +v.year }, veh: sel.veh, set: sel.set, mat: sel.mat,
+        layout: cfg.layout, rows: cfg.rows, wheelbase: cfg.wheelbase, roof: cfg.roof, seats: cfg.seats, cargo: cfg.cargo,
+        name, email, phone, municipality: $('#vMuni').value.trim(), zip: $('#vZip').value.trim(), message: $('#cMsg').value.trim(),
+        consent: true, website: $('#cWebsite').value,
+      });
+      const note = r.kind === 'candidate' ? t('evo_chk_candidate').replace('{label}', r.label)
+        : r.kind === 'pending' ? t('evo_chk_pending').replace('{brand}', v.brand) : `${t('evo_chk_none')} ${t('evo_done_measure')}`;
+      $('.pinfo').innerHTML = `<div class="notice ok evo-done" role="status" tabindex="-1" id="evoDone">
+        <h2 style="margin:0 0 8px">${esc(t('evo_sent_title'))}</h2>
+        <p style="margin:0 0 8px">${esc(t('evo_sent_ref'))}: <b>${esc(r.ref)}</b></p>
+        <p style="margin:0 0 8px">${esc(note)}</p>
+        <p style="margin:0 0 8px">${esc(t('evo_sent_next').replace('{email}', email))}</p>
+        <p style="margin:0 0 8px"><b>${esc(t('evo_nocharge'))}</b></p>
+        ${r.mail ? '' : `<p class="muted small" style="margin:0 0 8px">${esc(t('evo_sent_nomail'))}</p>`}
+        <a class="btn ghost sm" href="/p/${esc(p.slug)}" data-link>${esc(t('evo_another'))}</a></div>`;
+      $('#evoDone').focus();
+      $('#evoDone').scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } catch (e) { showErr(errText(e.message)); btn.disabled = false; }
   });
 }
 
@@ -1548,6 +1815,7 @@ function legalText(page) {
         <p>These terms are governed by Spanish law. If you are a consumer, you may go to the courts of your place of residence.</p>`],
       privacy: ['Privacy policy', `<p>Controller: ${whoIn('en')}. Contact: ${mail}.</p>
         <p>We only collect the data needed to manage your account and to process and ship your orders (name, address, email, phone and, if you add it, your car). Legal basis: performance of the contract. We keep it while your account is active and for as long as tax law requires.</p>
+        <p>If you send a request for made-to-measure EVO mats, we also keep what you write in it (the vehicle, your contact details, your municipality and your message) and use it only to answer your request and, if you ask for it, to arrange a measurement.</p>
         <p>We share your data only with the carrier, our email provider (to send you the order emails) and, for card payments, with Stripe (and, if you choose PayPal or Revolut Pay on Stripe's payment page, also with that provider). Our hosting provider (the server this shop runs on) and the storage where we keep encrypted backups also hold the data, on our behalf only. We do not sell your data or send advertising without your consent.</p>
         <p>This website uses only one technical cookie to keep you logged in. It does not use tracking or advertising cookies, and it does not load fonts or other content from other websites (Stripe's payment page opens only when you pay by card). Your cart, your language and the delivery details you entered at checkout (so you don't have to type them again) are saved in your browser, on your device; you can delete them in your browser settings.</p>
         <p>You can access, correct or delete your data (including your account) by writing to ${mail}. You may also complain to the Spanish Data Protection Agency (aepd.es).</p>`],
@@ -1575,6 +1843,7 @@ function legalText(page) {
         <p>Estas condiciones se rigen por la ley española. Si eres consumidor, puedes acudir a los tribunales de tu domicilio.</p>`],
       privacy: ['Política de privacidad', `<p>Responsable: ${whoIn('es')}. Contacto: ${mail}.</p>
         <p>Solo recogemos los datos necesarios para gestionar tu cuenta y tramitar y enviar tus pedidos (nombre, dirección, email, teléfono y, si lo añades, tu coche). Base legal: ejecución del contrato. Los conservamos mientras tu cuenta esté activa y el tiempo que exige la normativa fiscal.</p>
+        <p>Si envías una solicitud de alfombrillas EVO a medida, guardamos también lo que escribes en ella (el vehículo, tus datos de contacto, tu municipio y tu mensaje) y lo usamos solo para responder a tu solicitud y, si lo pides, para acordar una medición.</p>
         <p>Solo compartimos tus datos con la empresa de transporte, nuestro proveedor de email (para enviarte los correos del pedido) y, en pagos con tarjeta, con Stripe (y, si eliges PayPal o Revolut Pay en la página de pago de Stripe, también con ese proveedor). Nuestro proveedor de alojamiento (el servidor donde funciona la tienda) y el almacenamiento donde guardamos copias de seguridad cifradas también conservan los datos, únicamente por cuenta nuestra. No vendemos tus datos ni enviamos publicidad sin tu consentimiento.</p>
         <p>Esta web solo usa una cookie técnica para mantener tu sesión iniciada. No usa cookies de seguimiento ni de publicidad, y no carga fuentes ni otros contenidos de otras webs (la página de pago de Stripe solo se abre si pagas con tarjeta). Tu carrito, tu idioma y los datos de envío que escribiste al hacer el pedido (para no tener que escribirlos otra vez) se guardan en tu navegador, en tu dispositivo; puedes borrarlos en los ajustes del navegador.</p>
         <p>Puedes acceder, rectificar o suprimir tus datos (incluida tu cuenta) escribiendo a ${mail}. También puedes reclamar ante la Agencia Española de Protección de Datos (aepd.es).</p>`],

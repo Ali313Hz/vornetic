@@ -57,8 +57,8 @@ const STATUS = () => L({ pending: 'Ödeme bekliyor', paid: 'Ödendi — gönderi
   { pending: 'Pendiente de pago', paid: 'Pagado — por enviar', shipped: 'Enviado', delivered: 'Entregado', cancelled: 'Cancelado' });
 const PAY = () => L({ card: 'Kart (Stripe)', bizum: 'Bizum', transfer: 'Havale', contact: 'İletişimle ödeme' },
   { card: 'Tarjeta (Stripe)', bizum: 'Bizum', transfer: 'Transferencia', contact: 'Pago acordado por contacto' });
-const TABS = () => L({ orders: 'Siparişler', customers: 'Müşteriler', withdrawals: 'Cayma', reviews: 'Yorumlar', products: 'Ürünler', categories: 'Kategoriler', bulbs: 'Ampuller', finance: 'Finans', stats: 'Özet', settings: 'Ayarlar' },
-  { orders: 'Pedidos', customers: 'Clientes', withdrawals: 'Desistimientos', reviews: 'Opiniones', products: 'Productos', categories: 'Categorías', bulbs: 'Bombillas', finance: 'Finanzas', stats: 'Resumen', settings: 'Ajustes' });
+const TABS = () => L({ orders: 'Siparişler', customers: 'Müşteriler', evo: 'EVO', withdrawals: 'Cayma', reviews: 'Yorumlar', products: 'Ürünler', categories: 'Kategoriler', bulbs: 'Ampuller', finance: 'Finans', stats: 'Özet', settings: 'Ayarlar' },
+  { orders: 'Pedidos', customers: 'Clientes', evo: 'EVO', withdrawals: 'Desistimientos', reviews: 'Opiniones', products: 'Productos', categories: 'Categorías', bulbs: 'Bombillas', finance: 'Finanzas', stats: 'Resumen', settings: 'Ajustes' });
 let ME = {};
 let tab = 'orders';
 
@@ -98,6 +98,7 @@ function drawTabs() {
   drawBackupWarning();
   $('#tabs').innerHTML = Object.entries(TABS()).map(([k, v]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}">${v}${
     k === 'withdrawals' && ME.open_withdrawals ? ` <span class="badge" style="position:static;display:inline-grid">${ME.open_withdrawals}</span>` : ''}${
+    k === 'evo' && ME.evo_new ? ` <span class="badge" style="position:static;display:inline-grid" title="${L('Yeni EVO talepleri', 'Solicitudes EVO nuevas')}">${ME.evo_new}</span>` : ''}${
     k === 'orders' && ME.overdue_orders ? ` <span class="badge" style="position:static;display:inline-grid" title="${L('5 günü geçmiş, ödemesi kontrol edilecek', 'Más de 5 días: comprobar el pago')}">${ME.overdue_orders}</span>` : ''}</button>`).join('');
 }
 async function refreshMe() { try { ME = await api('/api/admin/me'); drawTabs(); } catch {} }
@@ -107,7 +108,7 @@ $('#logout').addEventListener('click', async () => { await send('/api/admin/logo
 function show() {
   root.innerHTML = `<p class="muted">${L('Yükleniyor…', 'Cargando…')}</p>`;
   window.scrollTo(0, 0);
-  ({ orders: viewOrders, customers: viewCustomers, withdrawals: viewWithdrawals, reviews: viewReviews, products: viewProducts, categories: viewCategories, bulbs: viewBulbs, finance: viewFinance, stats: viewStats, settings: viewSettings })[tab]().catch(e => {
+  ({ orders: viewOrders, customers: viewCustomers, evo: viewEvoAdmin, withdrawals: viewWithdrawals, reviews: viewReviews, products: viewProducts, categories: viewCategories, bulbs: viewBulbs, finance: viewFinance, stats: viewStats, settings: viewSettings })[tab]().catch(e => {
     root.innerHTML = `<p class="notice err">${esc(e.message)}</p>`;
   });
 }
@@ -332,6 +333,108 @@ async function viewCustomer(id) {
   $('#delU').addEventListener('click', async () => {
     if (!confirm(L('Bu müşteri hesabı silinsin mi? Siparişleri kayıtlarda kalır.', '¿Borrar la cuenta de este cliente? Sus pedidos se conservan.'))) return;
     await api('/api/admin/customers/' + id, { method: 'DELETE' }); toast(L('Silindi', 'Borrado')); show();
+  });
+}
+
+/* ---------- EVO: talepler ve şablonlar ---------- */
+let evoFilter = '';
+const EVO_STATUS = () => L({ new: 'Yeni', contacted: 'İletişime geçildi', confirmed: 'Onaylandı (uyuyor)', needs_measurement: 'Ölçüm gerekli', declined: 'Reddedildi', closed: 'Kapandı' },
+  { new: 'Nueva', contacted: 'Contactada', confirmed: 'Confirmada (encaja)', needs_measurement: 'Requiere medición', declined: 'Rechazada', closed: 'Cerrada' });
+const EVO_KIND = () => L({ candidate: 'Şablon eşleşmesi olabilir', pending: 'Model listesi onaylanmadı (inceleme)', measurement: 'Şablon yok — yerinde ölçüm' },
+  { candidate: 'Posible plantilla', pending: 'Lista de modelos sin confirmar (revisión)', measurement: 'Sin plantilla — medición en persona' });
+const EVO_BODY = () => L({ sedan: 'Sedan', hatch: 'Kompakt', wagon: 'Station', suv: 'SUV (5 koltuk)', suvbig: 'Büyük SUV', mpv: 'Minivan', vansmall: 'Küçük van', vanmedium: 'Orta van', vanlarge: 'Büyük van' },
+  { sedan: 'Berlina', hatch: 'Compacto', wagon: 'Familiar', suv: 'SUV (5 plazas)', suvbig: 'SUV grande', mpv: 'Monovolumen', vansmall: 'Furgoneta pequeña', vanmedium: 'Furgoneta mediana', vanlarge: 'Furgón grande' });
+const EVO_LAYOUT = () => L({ cargo: 'Yük (boş zemin)', kombi: 'Kombi (yolcu)', crew: 'Çift kabin' }, { cargo: 'Carga (suelo vacío)', kombi: 'Kombi (pasajeros)', crew: 'Doble cabina' });
+
+function evoRequestHtml(r) {
+  const sel = r.selection || {};
+  const wa = waUrl(r.phone, `Vornetic — ${r.ref}`);
+  const cfg = [r.layout && EVO_LAYOUT()[r.layout], r.rows && `${r.rows} ${L('sıra', 'filas')}`, r.wheelbase, r.roof, r.seats && `${r.seats} ${L('koltuk', 'plazas')}`].filter(Boolean);
+  return `<div class="order" data-id="${r.id}">
+    <div class="order-head"><div><b>${esc(r.ref)}</b> · <span class="muted">${esc(day(r.created_at))}</span> · ${esc(r.name)}</div>
+      <span class="status ${r.status === 'new' ? 'pending' : r.status === 'confirmed' ? 'delivered' : ''}">${esc(EVO_STATUS()[r.status] || r.status)}</span></div>
+    <div class="small"><b>${esc(r.brand)} ${esc(r.model)} · ${esc(r.year)}</b> — ${esc(sel.veh?.es)} · ${esc(sel.set?.es)} · ${esc(sel.mat?.es)}${r.cargo ? ` · <b>${L('yük zemini teklifi isteniyor', 'pide presupuesto de suelo de carga')}</b>` : ''}</div>
+    ${cfg.length ? `<div class="small muted">${esc(cfg.join(' · '))}</div>` : ''}
+    <div class="small"><span class="notice ${r.kind === 'measurement' ? 'warn' : 'ok'}" style="display:inline-block;padding:2px 8px">${esc(EVO_KIND()[r.kind])}</span>${r.template ? ` ${esc(r.template)}` : ''}
+      ${r.ref_price_cents != null ? ` · ${L('liste fiyatı', 'precio de lista')} ${eur(r.ref_price_cents)}` : ''}</div>
+    ${r.municipality || r.zip ? `<div class="small">📍 ${esc(r.municipality)} ${esc(r.zip)}</div>` : ''}
+    ${r.message ? `<p class="notice" style="margin-top:8px">${esc(r.message)}</p>` : ''}
+    <div class="order-actions">
+      <a class="link small" href="mailto:${esc(r.email)}">${esc(r.email)}</a> · <a class="link small" href="tel:${esc(r.phone)}">${esc(r.phone)}</a>${wa ? ` · <a class="link small" href="${wa}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+    </div>
+    <div class="grid2" style="margin-top:10px">
+      <label class="f" style="margin:0"><span>${L('Durum', 'Estado')}</span><select class="in evs">${Object.entries(EVO_STATUS()).map(([k, v]) => `<option value="${k}"${k === r.status ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select></label>
+      <label class="f" style="margin:0"><span>${L('Not (sadece sen görürsün)', 'Nota (solo la ves tú)')}</span><textarea class="in evn" rows="2" maxlength="1000">${esc(r.admin_note)}</textarea></label>
+    </div>
+    <div class="order-actions"><button class="btn sm evsave">${L('Kaydet', 'Guardar')}</button>
+      <button class="btn danger sm evdel" style="margin-left:auto">${L('Sil', 'Borrar')}</button></div></div>`;
+}
+function evoTemplateHtml(t) {
+  const isNew = !t.id;
+  const opt = (v, cur, label) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`;
+  return `<details class="box evt" data-id="${t.id || ''}"${isNew || t.status === 'pending' ? ' open' : ''}>
+    <summary><b>${isNew ? L('+ Yeni şablon', '+ Nueva plantilla') : esc([t.brand, t.model, t.year_from ? (t.year_from === t.year_to ? t.year_from : `${t.year_from}–${t.year_to}`) : ''].filter(Boolean).join(' · '))}</b>
+      ${isNew ? '' : t.status === 'pending' ? `<span class="notice warn" style="display:inline-block;padding:1px 8px;margin-left:8px">${L('onay bekliyor', 'pendiente de confirmar')}</span>` : ''}</summary>
+    <div class="grid2" style="margin-top:12px">
+      <label class="f"><span>${L('Marka', 'Marca')}</span><input class="in" data-f="brand" maxlength="40" value="${esc(t.brand)}"></label>
+      <label class="f"><span>${L('Model (onaylı şablonda zorunlu)', 'Modelo (obligatorio en una plantilla confirmada)')}</span><input class="in" data-f="model" maxlength="80" value="${esc(t.model)}"></label>
+      <label class="f"><span>${L('Müşterinin yazabileceği model adları (virgülle)', 'Nombres de modelo que puede escribir el cliente (separados por comas)')}</span><input class="in" data-f="aliases" value="${esc(t.aliases)}" placeholder="e90, 3 series, serie 3"></label>
+      <label class="f"><span>${L('Durum', 'Estado')}</span><select class="in" data-f="status">${opt('confirmed', t.status, L('Onaylı şablon', 'Plantilla confirmada'))}${opt('pending', t.status, L('Beklemede (marka düzeyinde, inceleme)', 'Pendiente (a nivel de marca, revisión)'))}</select></label>
+      <label class="f"><span>${L('Yıl (başlangıç)', 'Año (desde)')}</span><input class="in" data-f="year_from" inputmode="numeric" maxlength="4" value="${t.year_from || ''}"></label>
+      <label class="f"><span>${L('Yıl (bitiş)', 'Año (hasta)')}</span><input class="in" data-f="year_to" inputmode="numeric" maxlength="4" value="${t.year_to || ''}"></label>
+      <label class="f"><span>${L('Araç tipi (boş = kısıtlama yok)', 'Tipo de vehículo (vacío = sin restricción)')}</span><select class="in" data-f="body"><option value="">—</option>${Object.entries(EVO_BODY()).map(([k, v]) => opt(k, t.body, v)).join('')}</select></label>
+      <label class="f"><span>${L('Konfigürasyon (van)', 'Configuración (furgoneta)')}</span><select class="in" data-f="layout"><option value="">—</option>${Object.entries(EVO_LAYOUT()).map(([k, v]) => opt(k, t.layout, v)).join('')}</select></label>
+      <label class="f"><span>${L('Uzunluk', 'Longitud')}</span><select class="in" data-f="wheelbase"><option value="">—</option>${['L1', 'L2', 'L3', 'L4'].map(v => opt(v, t.wheelbase, v)).join('')}</select></label>
+      <label class="f"><span>${L('Tavan yüksekliği', 'Altura de techo')}</span><select class="in" data-f="roof"><option value="">—</option>${['H1', 'H2', 'H3'].map(v => opt(v, t.roof, v)).join('')}</select></label>
+    </div>
+    <label class="f"><span>${L('Not (sadece sen görürsün)', 'Nota (solo la ves tú)')}</span><input class="in" data-f="note" maxlength="200" value="${esc(t.note)}"></label>
+    <div class="order-actions"><button class="btn sm evtsave">${isNew ? L('Ekle', 'Añadir') : L('Kaydet', 'Guardar')}</button>
+      ${isNew ? '' : `<button class="btn danger sm evtdel" style="margin-left:auto">${L('Sil', 'Borrar')}</button>`}</div>
+  </details>`;
+}
+async function viewEvoAdmin() {
+  const [reqs, tpls] = await Promise.all([api('/api/admin/evo/requests'), api('/api/admin/evo/templates')]);
+  const list = evoFilter ? reqs.filter(r => r.status === evoFilter) : reqs;
+  const blank = { id: '', brand: '', model: '', aliases: '', year_from: '', year_to: '', body: '', wheelbase: '', roof: '', layout: '', status: 'confirmed', note: '' };
+  root.innerHTML = `
+    <div class="section-head"><h2>${L('EVO talepleri', 'Solicitudes EVO')}</h2>
+      <select class="in" id="evF" data-nodirty style="width:auto"><option value="">${L('Hepsi', 'Todas')}</option>${Object.entries(EVO_STATUS()).map(([k, v]) => `<option value="${k}"${k === evoFilter ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select></div>
+    <p class="notice" style="margin-bottom:16px">${L(`Bunlar sipariş değil, talep: ödeme alınmaz, stok ayrılmaz, Stripe'a gitmez. Müşteri araç tipini, seti, aracın marka/model/yılını ve iletişim bilgilerini gönderir; uyup uymadığını sen onaylarsın ve müşteriye yazarsın.
+      "Şablon eşleşmesi olabilir" sadece bir ipucudur: marka, model, yıl ve araç tipi (ve varsa uzunluk/tavan/konfigürasyon) şablonla birebir uyuşuyor demektir; yine de sen onaylarsın.
+      Şablonu olmayan araçlar için müşteri ölçüm ister: sadece posta kodu ayarında yazan bölgede (Ayarlar → varsayılan 28 = Madrid) kabul edilir; dışarısı sunucu tarafından reddedilir.`,
+      `Son solicitudes, no pedidos: no se cobra nada, no se reserva stock y no pasan por Stripe. El cliente envía el tipo de vehículo, el juego, la marca/modelo/año de su vehículo y sus datos de contacto; tú confirmas si encaja y le escribes.
+      "Posible plantilla" es solo una pista: marca, modelo, año y tipo de vehículo (y longitud/techo/configuración si los hay) coinciden exactamente con una plantilla; aun así lo confirmas tú.
+      Para vehículos sin plantilla el cliente pide una medición: solo se acepta en la zona del ajuste de códigos postales (Ajustes → por defecto 28 = Madrid); fuera de ella el servidor la rechaza.`)}</p>
+    ${list.length ? list.map(evoRequestHtml).join('') : `<p class="muted">${L('Talep yok.', 'No hay solicitudes.')}</p>`}
+
+    <div class="section-head" style="margin-top:32px"><h2>${L('Araç şablonları', 'Plantillas de vehículos')}</h2></div>
+    <p class="notice" style="margin-bottom:16px">${L(`Bir şablon sadece yazdığı şeyi kapsar: model, yıl (aralık), araç tipi ve varsa uzunluk/tavan/konfigürasyon. Başka yıl, kasa, koltuk düzeni veya dingil mesafesine uyduğu varsayılmaz.
+      "Beklemede" bir satır marka düzeyindedir (ör. Zeekr): o markanın talepleri incelemeye düşer, otomatik onaylanmaz. Zeekr'in İspanya'da satılan model listesini onaylayınca, her model için "Onaylı şablon" ekle ve bu satırı sil.`,
+      `Una plantilla cubre solo lo que dice: modelo, año (rango), tipo de vehículo y, si los hay, longitud/techo/configuración. No se da por hecho que valga para otro año, carrocería, disposición de asientos o distancia entre ejes.
+      Una fila "Pendiente" es de nivel de marca (p. ej. Zeekr): las solicitudes de esa marca van a revisión, no se aprueban solas. Cuando confirmes la lista de modelos Zeekr vendidos en España, añade una "Plantilla confirmada" por modelo y borra esta fila.`)}</p>
+    ${tpls.map(evoTemplateHtml).join('')}
+    ${evoTemplateHtml(blank)}`;
+  $('#evF').addEventListener('change', e => { evoFilter = e.target.value; show(); });
+  $$('.order', root).forEach(el => {
+    $('.evsave', el).addEventListener('click', async () => {
+      try { await send('/api/admin/evo/requests/' + el.dataset.id, { status: $('.evs', el).value, admin_note: $('.evn', el).value }); toast(L('Kaydedildi', 'Guardado')); await refreshMe(); show(); }
+      catch (e) { toast(e.message); }
+    });
+    $('.evdel', el).addEventListener('click', async () => {
+      if (!confirm(L('Bu talep silinsin mi? (Müşterinin kişisel bilgileri de silinir.)', '¿Borrar esta solicitud? (También se borran los datos personales del cliente.)'))) return;
+      try { await api('/api/admin/evo/requests/' + el.dataset.id, { method: 'DELETE' }); await refreshMe(); show(); } catch (e) { toast(e.message); }
+    });
+  });
+  $$('.evt', root).forEach(el => {
+    const body = () => Object.fromEntries($$('[data-f]', el).map(i => [i.dataset.f, i.value]));
+    $('.evtsave', el).addEventListener('click', async () => {
+      try { await send('/api/admin/evo/templates' + (el.dataset.id ? '/' + el.dataset.id : ''), body(), el.dataset.id ? 'PUT' : 'POST'); toast(L('Kaydedildi', 'Guardado')); show(); }
+      catch (e) { toast(e.message); }
+    });
+    $('.evtdel', el)?.addEventListener('click', async () => {
+      if (!confirm(L('Bu şablon silinsin mi?', '¿Borrar esta plantilla?'))) return;
+      try { await api('/api/admin/evo/templates/' + el.dataset.id, { method: 'DELETE' }); show(); } catch (e) { toast(e.message); }
+    });
   });
 }
 
@@ -1139,6 +1242,10 @@ async function viewSettings() {
     <div class="box"><h3>${L('Şirket bilgileri (yasal sayfalarda görünür)', 'Datos del titular (salen en las páginas legales)')}</h3>
       <div class="grid2">${f('company_name', L('Ticari ad (sitede görünen)', 'Nombre comercial (el que sale en la web)'))}${f('company_holder', L('Yasal ad soyad (Titular)', 'Nombre y apellidos legales (Titular)'))}</div>
       <div class="grid2">${f('company_nif', 'NIF / NIE')}${f('company_address', L('Adres', 'Dirección'))}</div></div>
+    <div class="box"><h3>${L('EVO: yerinde ölçüm bölgesi', 'EVO: zona de medición en persona')}</h3>
+      <p class="muted small" style="margin-top:0">${L('Şablonu olmayan bir araç için müşteri yerinde ölçüm isteyebilir; sadece posta kodu bu rakamlarla başlıyorsa kabul edilir (virgülle ayır). Madrid = 28. Bunun dışındakiler sunucu tarafından reddedilir.',
+        'Para un vehículo sin plantilla el cliente puede pedir una medición en persona; solo se acepta si el código postal empieza por estas cifras (separadas por comas). Madrid = 28. Fuera de ellas el servidor la rechaza.')}</p>
+      ${f('evo_measure_zip_prefixes', L('Posta kodu başlangıçları', 'Códigos postales que empiezan por'))}</div>
     <button class="btn">${L('Kaydet', 'Guardar')}</button>
   </form>`;
   $('#sf').addEventListener('submit', async e => {

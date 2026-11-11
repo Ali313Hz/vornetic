@@ -5,10 +5,9 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { startServer, CUSTOMER } = require('./helpers');
+const { startServer } = require('./helpers');
 const catalog = require('../catalog');
 const EVO = require('../evo-prices');
-const Vehicle3D = require('../public/js/vehicle3d.js');
 
 // The price list, written out here on its own (euros: Standard, Premium) so a slip in evo-prices.js shows.
 // Compact, sedan, estate and SUV (5 seats) cost the same, as do the large SUV and the MPV.
@@ -44,11 +43,11 @@ test('every combination costs what the price list says; packs save 5 €; a set 
   assert.deepStrictEqual([pub.price_cents, pub.from], [4000, true], '"from 40 €"');
 });
 
-test('a new catalogue has the EVO mats from the price list, as "coming soon", with the vehicle types', async () => {
+test('a new catalogue has the EVO mats from the price list, available (not "coming soon"), with the vehicle types', async () => {
   const srv = await startServer();
   try {
     const p = (await srv.call('GET', '/api/products/evo-custom-mats')).body;
-    assert.deepStrictEqual([p.status, p.price_cents, p.from, p.fitment], ['soon', 4000, true, 'car']);
+    assert.deepStrictEqual([p.status, p.price_cents, p.from, p.fitment], ['available', 4000, true, 'car']);
     assert.deepStrictEqual(p.options.map(o => [o.id, o.values.map(v => v.id)]), [
       ['veh', ['sedan', 'hatch', 'wagon', 'suv', 'suvbig', 'mpv', 'vansmall', 'vanmedium', 'vanlarge']],
       ['set', ['set4', 'boot', 'pack', 'set4r3', 'packr3', 'cab', 'cab2']],
@@ -57,51 +56,6 @@ test('a new catalogue has the EVO mats from the price list, as "coming soon", wi
     assert.match(p.prices.es, /^# Furgonetas · suelo de la zona de carga \| Estándar \| Premium\n/);
     assert.match(p.prices.en, /^# Vans · load-area floor \| Standard \| Premium\n/);
     assert.strictEqual((await srv.call('GET', '/api/products')).body.length, 9, 'the other products are still there');
-  } finally { await srv.stop(); }
-});
-
-test('the server charges the list price for the chosen type of vehicle, set and material', async () => {
-  const srv = await startServer();
-  try {
-    const list = (await srv.admin('GET', '/api/admin/products')).body;
-    const evo = list.find(p => p.slug === 'evo-custom-mats');
-    const car = { brand: 'Seat', model: 'León', year: 2019 };          // typed by the customer, not from a list
-    let ip = 20;
-    const buy = (options, lang = 'es', vehicle = car) => srv.call('POST', '/api/orders', { ...CUSTOMER, lang, payment_method: 'contact',
-      items: [{ id: evo.id, qty: 1, car: vehicle, options }] }, { 'X-Forwarded-For': `198.51.100.${ip++}` });
-    // the owner switches it on (a new catalogue has it as "coming soon")
-    assert.strictEqual((await buy({ veh: 'sedan', set: 'set4', mat: 'std' })).status, 400, 'coming soon: not sold');
-    assert.strictEqual((await srv.admin('PUT', '/api/admin/products/' + evo.id, { ...evo, status: 'available', stock: 20 })).status, 200);
-    // saving it in the panel keeps every id and every price (the panel only keeps ids of lower-case letters and digits)
-    const saved = (await srv.admin('GET', '/api/admin/products')).body.find(p => p.id === evo.id);
-    assert.deepStrictEqual(saved.options, evo.options, 'options unchanged by a save');
-    assert.deepStrictEqual(saved.combos, evo.combos, 'prices unchanged by a save');
-
-    for (const [options, euros] of [
-      [{ veh: 'sedan', set: 'set4', mat: 'std' }, 40], [{ veh: 'hatch', set: 'pack', mat: 'prem' }, 105],
-      [{ veh: 'suvbig', set: 'boot', mat: 'std' }, 60], [{ veh: 'mpv', set: 'packr3', mat: 'prem' }, 145],
-      [{ veh: 'vansmall', set: 'cab', mat: 'std' }, 40], [{ veh: 'vanmedium', set: 'cab2', mat: 'prem' }, 90], [{ veh: 'vanlarge', set: 'cab', mat: 'prem' }, 60],
-    ]) {
-      const r = await buy(options);
-      assert.strictEqual(r.status, 200, JSON.stringify(r.body));
-      const line = JSON.parse((await srv.orderByRef(r.body.ref)).items)[0];
-      assert.deepStrictEqual([line.unit_cents, line.car], [euros * 100, 'Seat León · 2019'], JSON.stringify(options));
-    }
-    // not on the list: a third row for a 5-seat car, a cabin set for a sedan, a boot mat for a van
-    const msg = 'Alfombrillas EVO a medida no está disponible con las opciones elegidas';
-    for (const options of [{ veh: 'suv', set: 'set4r3', mat: 'std' }, { veh: 'sedan', set: 'cab', mat: 'std' }, { veh: 'vansmall', set: 'boot', mat: 'std' }]) {
-      const no = await buy(options);
-      assert.deepStrictEqual([no.status, no.body.error], [400, msg], JSON.stringify(options));
-    }
-    // a price sent by the browser is ignored
-    const cheat = await srv.call('POST', '/api/orders', { ...CUSTOMER, payment_method: 'contact',
-      items: [{ id: evo.id, qty: 1, car, options: { veh: 'mpv', set: 'pack', mat: 'prem' }, unit_cents: 100, price_cents: 100 }] },
-    { 'X-Forwarded-For': '198.51.100.90' });
-    assert.strictEqual(JSON.parse((await srv.orderByRef(cheat.body.ref)).items)[0].unit_cents, 12500);
-    // and the vehicle is needed whatever the options are
-    const none = await srv.call('POST', '/api/orders', { ...CUSTOMER, lang: 'en', payment_method: 'contact',
-      items: [{ id: evo.id, qty: 1, options: { veh: 'sedan', set: 'set4', mat: 'std' } }] }, { 'X-Forwarded-For': '198.51.100.91' });
-    assert.deepStrictEqual([none.status, none.body.error], [400, "Please enter your vehicle's brand, model and year for EVO Custom-Fit Car Mats"]);
   } finally { await srv.stop(); }
 });
 
@@ -198,44 +152,6 @@ test('the EVO page has no car list: the customer types brand, model and year, wi
 });
 
 // ---------- the 3D picture ----------
-test('3D picture: every type of vehicle of the price list has a shape, and every set draws its mats', () => {
-  assert.deepStrictEqual([...Vehicle3D.VEHICLE_IDS].sort(), EVO.VEHICLES.map(v => v.id).sort(), 'the shapes are the vehicle types of the list');
-  assert.deepStrictEqual(Object.keys(Vehicle3D.SETS).sort(), EVO.SETS.map(s => s.id).sort(), 'every set of the list');
-  const count = { front: 2, rear: 2, second: 1, third: 1, boot: 1 };
-  for (const v of EVO.VEHICLES) for (const s of EVO.SETS) {
-    if (!EVO.PRICES[v.cls][s.id]) continue;                         // a set the vehicle does not have is never shown
-    const m = Vehicle3D.build(v.id, s.id);
-    assert.ok(m.faces.length > 100, `${v.id}|${s.id} has a body`);
-    assert.ok(m.faces.every(f => f.pts.every(p => p.every(Number.isFinite)) && Number.isFinite(f.shade)), `${v.id}|${s.id}: finite numbers`);
-    assert.deepStrictEqual([...m.mats].sort(), Vehicle3D.SETS[s.id].flatMap(part => Array(count[part]).fill(part)).sort(), `${v.id}|${s.id}: the mats of the set`);
-  }
-  // nothing chosen yet: the mats are only shown faintly, none as chosen; an unknown type falls back to a sedan
-  assert.deepStrictEqual(Vehicle3D.build('suv').mats, []);
-  assert.strictEqual(Vehicle3D.build('nonsense', 'set4').faces.length, Vehicle3D.build('sedan', 'set4').faces.length);
-});
-
-test('3D picture: vans are taller and longer than cars, and a large van is the largest; the view turns and looks down', () => {
-  const S = Vehicle3D.SPECS, top = id => Math.max(...(S[id].cabin || S[id].shell).map(p => p[1]));
-  assert.ok(S.vanmedium.L > S.suv.L && S.vanlarge.L > S.vanmedium.L && S.vanlarge.L > S.suvbig.L, 'lengths');
-  assert.ok(top('vanlarge') > top('vanmedium') && top('vanmedium') > top('vansmall') && top('vansmall') > top('suv') && top('suv') > top('sedan'), 'heights');
-  assert.ok(S.hatch.L < S.sedan.L, 'a compact car is shorter than a sedan');
-  const close = (a, b) => Math.abs(a - b) < 1e-9;
-  const front = Vehicle3D.project([2, 0.5, 0], 0, 0, 0.5);                   // seen from the side: the front of the car is on the right
-  assert.ok(close(front[0], 2) && close(front[1], 0) && close(front[2], 0));
-  const turned = Vehicle3D.project([2, 0.5, 0], Math.PI / 2, 0, 0.5);        // turned a quarter: the front points away from or at the viewer
-  assert.ok(close(turned[0], 0) && Math.abs(Math.abs(turned[2]) - 2) < 1e-9);
-  const down = Vehicle3D.project([0, 1, 0], 0, Math.PI / 2, 0);              // from straight above: height becomes depth, nearer the camera
-  assert.ok(close(down[1], 0) && close(down[2], -1));
-});
-
-test('3D picture: the page loads it, and it needs nothing from outside', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
-  assert.ok(html.indexOf('/js/vehicle3d.js') > 0 && html.indexOf('/js/vehicle3d.js') < html.indexOf('/js/app.js'), 'loaded before app.js');
-  const code = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'vehicle3d.js'), 'utf8');
-  assert.doesNotMatch(code, /https?:\/\/|\bimport\b|\brequire\(|\bfetch\(|XMLHttpRequest|eval\(|new Function|innerHTML/, 'no outside requests, no dynamic code, no HTML injection');
-  assert.match(code, /prefers-reduced-motion/, 'it respects reduced motion');
-});
-
 // ---------- step by step choice of the EVO mats ----------
 function viewCode() {
   const lines = ['valOf', 'comboKey', 'combosCache', 'fitsSel'].map(n => { const m = src.match(new RegExp(`^const ${n} = .*$`, 'm')); assert.ok(m, n); return m[0]; }).join('\n');

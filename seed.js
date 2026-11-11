@@ -81,8 +81,8 @@ module.exports = function seed(db) {
     name_en: EVO.name_en, name_es: EVO.name_es, desc_en: EVO.desc_en, desc_es: EVO.desc_es,
     price: EVO.price_cents, image: '/img/p-mat-evo.svg',
   });
-  // "Coming soon" until the owner switches it on in /admin
-  db.prepare("UPDATE products SET status = 'soon', opts = ?, combos = ?, media = ?, prices_en = ?, prices_es = ? WHERE slug = 'evo-custom-mats'")
+  // Available as a REQUEST (evo.js): never bought online, so its stock is not used
+  db.prepare("UPDATE products SET opts = ?, combos = ?, media = ?, prices_en = ?, prices_es = ? WHERE slug = 'evo-custom-mats'")
     .run(JSON.stringify(EVO.options), JSON.stringify(EVO.combos), JSON.stringify([{ type: 'image', src: '/img/p-mat-evo.svg' }]),
       EVO.prices_en, EVO.prices_es);
 

@@ -223,5 +223,45 @@ function orderExpired(o, s) {
     <p><b>${t.order}: ${esc(o.ref)}</b></p><p>${t.bye}</p>`, s));
 }
 
-module.exports = { enabled, orderConfirmation, statusUpdate, orderExpired, withdrawalAck, passwordReset, shopNewOrder, shopWithdrawal,
+// ---------- EVO requests (not orders: nothing is charged or reserved) ----------
+const EVO_TXT = {
+  en: {
+    subject: ref => `Request ${ref} received — Vornetic`,
+    intro: 'We have received your request for made-to-measure EVO mats. This is a request, not an order: nothing has been charged and nothing is reserved.',
+    candidate: label => `Your vehicle seems to match one of our templates (${label}). We still check it ourselves before making anything.`,
+    pending: brand => `We are confirming which ${brand} models we have templates for. We will review yours and get back to you.`,
+    measurement: 'We do not have a template for this vehicle, so it would have to be measured in person. We only do that in the Madrid area. We will contact you to arrange it. We cannot promise to make the mats before measuring the vehicle.',
+    vehicle: 'Vehicle', type: 'Type of vehicle', set: 'Set', material: 'Material', cargo: 'Also: load-area floor (priced with the exact model and length)', ref: 'List price of the set (the shop confirms the final price)',
+    next: 'We will write to you or call you. You do not have to do anything else.', bye: 'Thank you, Vornetic',
+  },
+  es: {
+    subject: ref => `Solicitud ${ref} recibida — Vornetic`,
+    intro: 'Hemos recibido tu solicitud de alfombrillas EVO a medida. Es una solicitud, no un pedido: no se ha cobrado nada y no hay nada reservado.',
+    candidate: label => `Tu vehículo parece coincidir con una de nuestras plantillas (${label}). Aun así lo comprobamos nosotros antes de fabricar nada.`,
+    pending: brand => `Estamos confirmando de qué modelos ${brand} tenemos plantilla. Revisaremos el tuyo y te responderemos.`,
+    measurement: 'No tenemos plantilla para este vehículo, así que habría que medirlo en persona. Solo lo hacemos en la zona de Madrid. Nos pondremos en contacto contigo para acordarlo. No podemos prometer la fabricación antes de medir el vehículo.',
+    vehicle: 'Vehículo', type: 'Tipo de vehículo', set: 'Juego', material: 'Material', cargo: 'Además: suelo de la zona de carga (se presupuesta con el modelo y la longitud exactos)', ref: 'Precio de lista del juego (el precio final lo confirma la tienda)',
+    next: 'Te escribiremos o te llamaremos. No tienes que hacer nada más.', bye: 'Gracias, Vornetic',
+  },
+};
+function evoRequestAck(r, s, label) {
+  const t = EVO_TXT[r.lang === 'en' ? 'en' : 'es'], sel = JSON.parse(r.selection || '{}'), g = o => (r.lang === 'en' ? o.en : o.es);
+  const kind = r.kind === 'candidate' ? t.candidate(esc(label)) : r.kind === 'pending' ? t.pending(esc(r.brand)) : t.measurement;
+  return send(r.email, t.subject(r.ref), layout(`<p>${r.lang === 'en' ? 'Hello' : 'Hola'} ${esc(r.name)},</p><p>${t.intro}</p><p>${kind}</p>
+    <p><b>${t.vehicle}:</b> ${esc(r.brand)} ${esc(r.model)} · ${esc(r.year)}<br><b>${t.type}:</b> ${esc(g(sel.veh))}<br><b>${t.set}:</b> ${esc(g(sel.set))}<br><b>${t.material}:</b> ${esc(g(sel.mat))}
+    ${r.cargo ? `<br>${t.cargo}` : ''}${r.ref_price_cents != null ? `<br>${t.ref}: ${eur(r.ref_price_cents)}` : ''}</p>
+    <p>${t.next}</p><p>${t.bye}</p>`, s));
+}
+function shopEvoRequest(r, s, base, label) {
+  const sel = JSON.parse(r.selection || '{}');
+  const kind = { candidate: 'Şablon eşleşmesi olabilir', pending: 'Şablon listesi onaylanmadı (inceleme)', measurement: 'Şablon yok — yerinde ölçüm' }[r.kind];
+  return send(s.shop_email, `🚗 Yeni EVO talebi ${r.ref} — ${r.brand} ${r.model} ${r.year}`, layout(`
+    <p><b>${esc(r.ref)}</b> · ${esc(kind)}${label ? ` · ${esc(label)}` : ''}</p>
+    <p>${esc(r.brand)} ${esc(r.model)} · ${esc(r.year)}<br>${esc(sel.veh?.es)} · ${esc(sel.set?.es)} · ${esc(sel.mat?.es)}${r.cargo ? '<br>+ zona de carga (presupuesto)' : ''}
+    ${r.layout ? `<br>Layout: ${esc(r.layout)}${r.rows ? ' · filas: ' + esc(r.rows) : ''} · ${esc(r.wheelbase)} · ${esc(r.roof)}` : ''}${r.seats ? `<br>Plazas: ${esc(r.seats)}` : ''}
+    ${r.ref_price_cents != null ? `<br>Liste fiyatı: ${eur(r.ref_price_cents)}` : ''}</p>
+    <p>${esc(r.name)}<br>${esc(r.email)} · ${esc(r.phone)}${r.municipality ? `<br>${esc(r.municipality)} ${esc(r.zip)}` : ''}</p>
+    ${r.message ? `<p><i>${esc(r.message)}</i></p>` : ''}<p><a href="${base}/admin">Panel</a></p>`, s));
+}
+module.exports = { enabled, evoRequestAck, shopEvoRequest, orderConfirmation, statusUpdate, orderExpired, withdrawalAck, passwordReset, shopNewOrder, shopWithdrawal,
   chargedAfterCancel, shopChargedAfterCancel, test };

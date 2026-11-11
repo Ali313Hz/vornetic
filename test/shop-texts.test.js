@@ -35,7 +35,7 @@ test('order errors come in the checkout language (ES and EN)', async () => {
       [{ items: [{ id: p, qty: 1 }], extra: { payment_method: 'bizum' } }, 'Este método de pago no está disponible', 'Payment method not available'],
       [{ items: [{ id: 999999, qty: 1 }] }, 'Un producto de tu carrito ya no está disponible', 'A product in your cart is no longer available'],
       [{ items: [{ id: none, qty: 1 }] }, 'Agotado: Artículo test', 'Out of stock: Test item'],
-      [{ items: [{ id: car, qty: 1 }] }, 'Escribe la marca, el modelo y el año de tu vehículo para Artículo test', "Please enter your vehicle's brand, model and year for Test item"],
+      [{ items: [{ id: car, qty: 1 }] }, 'Artículo test no se pide en la tienda: envía una solicitud en la página del producto. Confirmamos que las alfombrillas encajan antes de cobrar nada.', 'Test item is not ordered in the shop: send a request on the product page. We confirm that the mats fit before anything is charged.'],
       [{ items: [{ id: few, qty: 5 }] }, 'No hay stock suficiente: Artículo test (quedan 2, has pedido 5)', 'Not enough stock: Test item (only 2 left, you asked for 5)'],
     ];
     for (const [c, es, en] of cases) {
@@ -85,8 +85,11 @@ test('legal owner (Titular) and BIC: saved in settings, shown in config, payment
     const o = await s.order('es', [{ id: p, qty: 1 }]);
     assert.strictEqual(o.status, 200, JSON.stringify(o.body));
     assert.deepStrictEqual([o.body.iban_holder, o.body.iban_bic], ['Test Owner', 'TESTESMMXXX']);
-    await s.smtp.waitFor(1);
-    const mail = s.smtp.text(0);
-    assert.match(mail, /Test Owner · BIC TESTESMMXXX/);
+    // Two e-mails leave for one order: the customer's (with the payment details) and the shop's notice. Which one
+    // arrives first is not fixed, so take the one meant for the customer instead of "the first".
+    await s.smtp.waitFor(2);
+    const toCustomer = s.smtp.messages.map((_, i) => s.smtp.text(i)).find(m => /^To: buyer@example\.test/m.test(m));
+    assert.ok(toCustomer, 'the order e-mail to the customer');
+    assert.match(toCustomer, /Test Owner · BIC TESTESMMXXX/);
   } finally { await s.close(); }
 });

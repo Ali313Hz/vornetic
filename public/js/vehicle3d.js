@@ -172,6 +172,99 @@
     return { faces, L, W, H: Math.max(...outline.map(p => p[1]), ...(spec.cabin || []).map(p => p[1])), mats };
   }
 
+  // ---------- rear area: the luggage area of a passenger vehicle, the load floor of a van ----------
+  // An illustration of the space behind the front seats: floor, walls, wheel arches, what stands in front of it
+  // (rear seat backs, a bulkhead, rows of seats) and the floor covering proposed for it. The sizes are illustrative
+  // proportions (a compact van's area is short and low, a large van's long and tall), NOT the measurements of any
+  // vehicle: the shop measures the real one. A luggage area is shown with seat backs and a tailgate sill; an empty
+  // commercial van's load floor with a bulkhead behind the cab, a ribbed floor and a rear door frame.
+  const ROW_LEN = 0.85;                                           // the length one row of seats takes in a van
+  const CARGO_LEN = { vansmall: { any: 1.8 }, vanmedium: { L1: 2.5, L2: 2.9, any: 2.6 }, vanlarge: { L2: 3.1, L3: 3.7, L4: 4.1, any: 3.4 } };
+  const CARGO_H = { vansmall: { any: 1.25 }, vanmedium: { H1: 1.35, H2: 1.65, H3: 1.9, any: 1.5 }, vanlarge: { H1: 1.65, H2: 1.95, H3: 2.15, any: 1.95 } };
+  const CARGO_W = { vansmall: 1.25, vanmedium: 1.6, vanlarge: 1.75 };
+  const LUGGAGE = {                                               // floor length (seats up), inner width, height (a sedan: under the parcel shelf)
+    sedan: [0.95, 1.05, 0.50], hatch: [0.80, 1.00, 0.75], wagon: [1.05, 1.05, 0.80], suv: [1.00, 1.10, 0.85], suvbig: [1.10, 1.15, 0.90], mpv: [1.05, 1.10, 0.95],
+  };
+  const WALL = [190, 196, 206], FLOOR = [120, 124, 132], ARCH = [96, 100, 110], BULK = [150, 155, 165], DARK = [50, 50, 56];
+
+  // cfg = { layout: cargo | kombi | crew, rows: '2' | '3', wheelbase: L1..L4, roof: H1..H3, seats: '5' | '7', cargo: bool }
+  function rearSpec(vehicleId, cfg) {
+    cfg = cfg || {};
+    const spec = SPECS[vehicleId] || SPECS.sedan;
+    if (spec.kind === 'car') {
+      const id = LUGGAGE[vehicleId] ? vehicleId : 'sedan';
+      let [len, W, H] = LUGGAGE[id];
+      const seven = (id === 'suvbig' || id === 'mpv') && cfg.seats === '7';
+      if (seven) len = 0.45;                                      // third row up: only a short floor behind it
+      return { type: 'luggage', kind: 'luggage', Lt: len + 0.2, W, H, rows: 0, floorLen: len, parcel: id === 'sedan', seven };
+    }
+    const layout = ['cargo', 'kombi', 'crew'].includes(cfg.layout) ? cfg.layout : 'cargo';
+    const lengths = CARGO_LEN[vehicleId], heights = CARGO_H[vehicleId];
+    const rows = layout === 'kombi' ? (cfg.rows === '3' ? 2 : 1) : layout === 'crew' ? 1 : 0;    // rows of seats behind the front one
+    const Lt = Math.max(lengths[cfg.wheelbase] || lengths.any, rows * ROW_LEN + 0.45);
+    return { type: 'van', kind: layout, Lt, W: CARGO_W[vehicleId], H: heights[cfg.roof] || heights.any, rows, floorLen: Lt - rows * ROW_LEN, bulkhead: layout === 'cargo' };
+  }
+
+  // The faces of the rear area of one vehicle. The covering is drawn dark when it is part of what was chosen (the boot mat of a
+  // passenger vehicle's set; a van's load-area floor when it is requested), otherwise only as a faint outline: a preview.
+  function buildRear(vehicleId, setId, cfg) {
+    cfg = cfg || {};
+    const r = rearSpec(vehicleId, cfg), faces = [];
+    const { Lt, W, H } = r, xf = Lt / 2, xr = -Lt / 2, van = r.type === 'van';
+    const xFloor = van ? xf - r.rows * ROW_LEN : xf - 0.2;        // where the floor ends in front
+    const on = van ? cfg.cargo === true : !!(SETS[setId] && SETS[setId].includes('boot'));
+
+    faces.push(face(circle(0, 0, 1, 28).map(p => [p[0] * Lt * 0.7, -0.06, p[1] * W * 0.85]), [0, 0, 0], 0.07, { layer: 0, stroke: null }));
+    box(faces, xr, xf, -0.05, 0, -W / 2, W / 2, FLOOR, 0.5);                                   // floor
+    for (const z of [-W / 2, W / 2]) faces.push(face([[xr, 0, z], [xf, 0, z], [xf, H, z], [xr, H, z]], WALL, 0.10));   // walls
+    faces.push(face([[xr, H, -W / 2], [xf, H, -W / 2], [xf, H, W / 2], [xr, H, W / 2]], WALL, r.parcel ? 0.45 : 0.08)); // roof (a sedan: parcel shelf)
+
+    // wheel arches (never longer than the floor they are on: a short floor behind a third row has short arches)
+    const al = Math.min(van ? 0.62 : 0.5, (xFloor - xr) * 0.55), aw = van ? W * 0.14 : 0.16, ah = van ? 0.28 : 0.2;
+    const xa = clamp(xr + Lt * 0.33, xr + al / 2 + 0.03, xFloor - al / 2 - 0.03);
+    box(faces, xa - al / 2, xa + al / 2, 0, ah, -W / 2, -W / 2 + aw, ARCH, 0.6);
+    box(faces, xa - al / 2, xa + al / 2, 0, ah, W / 2 - aw, W / 2, ARCH, 0.6);
+
+    // what stands in front of the floor
+    if (!van) {                                                   // rear seat backs (seats up), with head restraints when there is room
+      const top = Math.min(H * 0.92, 0.62);
+      for (const [z0, z1] of [[-W / 2, -0.02], [0.02, W / 2]]) box(faces, xf - 0.2, xf, 0, top, z0, z1, SEAT, 0.5);
+      if (H > 0.7) for (const zc of [-W / 4, W / 4]) box(faces, xf - 0.14, xf - 0.06, top, top + 0.16, zc - 0.08, zc + 0.08, SEAT, 0.5);
+    } else if (r.bulkhead) {                                      // empty load floor: a bulkhead behind the cab
+      faces.push(face([[xf, 0, -W / 2], [xf, H, -W / 2], [xf, H, W / 2], [xf, 0, W / 2]], BULK, 0.55));
+    } else {                                                      // rows of seats take the front part of the area
+      for (let i = 0; i < r.rows; i++) {
+        const xc = xf - ROW_LEN * (i + 0.5);
+        for (const [z0, z1] of [[-W / 2 + 0.03, -0.02], [0.02, W / 2 - 0.03]]) {
+          box(faces, xc - 0.22, xc + 0.22, 0, 0.28, z0, z1, SEAT, 0.5);
+          box(faces, xc - 0.30, xc - 0.18, 0.28, 0.85, z0, z1, SEAT, 0.5);
+        }
+      }
+      for (const z of [-W / 2 - 0.004, W / 2 + 0.004]) faces.push(face([[xf - 0.1, H * 0.55, z], [xf - 0.1, H * 0.85, z], [xFloor + 0.1, H * 0.85, z], [xFloor + 0.1, H * 0.55, z]], GLASS, 0.3, { bias: 0.05 }));
+    }
+    if (van) for (let k = -3; k <= 3; k++)                         // ribbed commercial floor
+      faces.push(face([[xr + 0.05, 0.002, k * W / 8], [xFloor - 0.05, 0.002, k * W / 8]], [0, 0, 0], 0, { fill: false, stroke: 'rgba(90,90,100,0.35)' }));
+
+    // rear opening: door / tailgate frame and sill
+    faces.push(face([[xr, 0, -W / 2], [xr, H, -W / 2], [xr, H, W / 2], [xr, 0, W / 2]], [0, 0, 0], 0, { fill: false, stroke: 'rgba(40,40,46,0.85)', bias: -0.05 }));
+    box(faces, xr - 0.05, xr, -0.05, 0.03, -W / 2, W / 2, DARK, 0.7);
+
+    // the covering proposed for the floor, with a notch round each wheel arch
+    const w = W / 2 - 0.04, xm0 = xr + 0.03, xm1 = xFloor - 0.02, a0 = xa - al / 2, a1 = xa + al / 2, y = 0.006;
+    const poly = [[xm0, y, -w], [a0, y, -w], [a0, y, -(w - aw)], [a1, y, -(w - aw)], [a1, y, -w], [xm1, y, -w],
+      [xm1, y, w], [a1, y, w], [a1, y, w - aw], [a0, y, w - aw], [a0, y, w], [xm0, y, w]];
+    faces.push(face(poly, on ? MAT_ON : MAT_OFF, on ? 0.96 : 0.28, { stroke: on ? null : 'rgba(120,120,116,0.6)', dash: !on, bias: 0.02 }));
+    if (on) {
+      const c = [(xm0 + xm1) / 2, 0];
+      faces.push(face(poly.map(p => [c[0] + (p[0] - c[0]) * 0.9, y + 0.001, p[2] * 0.88]), [255, 255, 255], 0, { fill: false, stroke: 'rgba(255,255,255,0.75)', dash: true, bias: 0.06 }));
+    }
+    return {
+      faces, L: Lt, W, H, ref: Math.max(Lt * 0.95, W * 2.0, H * 2.1), yc: H * 0.3,
+      labels: [{ p: [xr - 0.02, H * 0.6, 0], key: 'rear' }, { p: [xf - 0.02, H * 0.45, 0], key: van && r.bulkhead ? 'bulkhead' : 'seats' }, { p: [(xm0 + xm1) / 2, 0.01, 0], key: 'coverage' }],
+      mats: on ? ['floor'] : [], coverage: on ? 'selected' : 'preview', rear: r,
+    };
+  }
+
   // ---------- view ----------
   // world point → [x, y, depth] for a camera that turns by yaw around the vehicle and looks down by pitch
   function project(p, yaw, pitch, cy0) {
@@ -182,11 +275,21 @@
   }
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const PITCH_3D = 0.42, PITCH_TOP = 1.5;
+  // camera presets: yaw null = the vehicle keeps turning by itself
+  const VIEWS = {
+    vehicle: { '3d': { pitch: PITCH_3D, yaw: null, auto: true, zoom: 1 }, top: { pitch: PITCH_TOP, yaw: 0, auto: false, zoom: 1 } },
+    rear: {
+      '3d': { pitch: 0.5, yaw: -2.1, auto: false, zoom: 1 },
+      rear: { pitch: 0.3, yaw: -Math.PI / 2, auto: false, zoom: 1.2 },     // looking in from behind
+      top: { pitch: PITCH_TOP, yaw: 0, auto: false, zoom: 1 },
+    },
+  };
 
-  function draw(ctx, w, h, model, yaw, pitch, alpha) {
+  function draw(ctx, w, h, model, yaw, pitch, alpha, zoom, text) {
     ctx.clearRect(0, 0, w, h);
-    const ref = (model.L + 5.4) / 2;                            // a common scale, so a van looks bigger than a hatchback
-    const D = ref * 2.4, f = 0.8 * w * D / ref, cyc = model.H * 0.42;
+    const ref = model.ref || (model.L + 5.4) / 2;                  // a common scale, so a van looks bigger than a hatchback
+    const D = ref * 2.4, f = 0.8 * w * D / ref * (zoom || 1), cyc = model.yc === undefined ? model.H * 0.42 : model.yc;
+    const at = p => { const q = project(p, yaw, pitch, cyc); return { q, s: [w / 2 + f * q[0] / (D + q[2]), h * 0.52 - f * q[1] / (D + q[2])] }; };
     const rows = [];
     for (const fc of model.faces) {
       const q = fc.pts.map(p => project(p, yaw, pitch, cyc));
@@ -213,27 +316,47 @@
       }
     }
     ctx.setLineDash([]);
+    if (model.labels && text) {                                    // short labels (rear / seats / coverage), drawn on top with a light halo
+      ctx.font = '600 11px Inter, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+      for (const lb of model.labels) {
+        const s = text['lbl_' + lb.key];
+        if (!s) continue;
+        const { s: [x, y] } = at(lb.p);
+        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.strokeText(s, x, y);
+        ctx.fillStyle = 'rgba(28,28,30,0.9)'; ctx.fillText(s, x, y);
+      }
+    }
   }
 
   // ---------- on the page ----------
-  // mount(host, { text: { view3d, viewTop, hint, note } }) → { set({ vehicle, set, label }), destroy() }
+  // mount(host, { text }) → { set({ vehicle, set, label, config }), setMode('vehicle' | 'rear'), destroy() }
+  // config = { layout, rows, wheelbase, roof, seats, cargo } — see rearSpec. text: the page's words (view3d, viewRear, viewTop, hint, note,
+  // modeVehicle, modeLuggage, modeLoad, cap_luggage / cap_cargo / cap_kombi / cap_crew, capSelected, capPreviewCar, capPreviewVan, lbl_rear / lbl_seats / lbl_bulkhead / lbl_coverage)
   function mount(host, options) {
-    const text = Object.assign({ view3d: '3D', viewTop: 'Top', hint: '', note: '' }, options && options.text);
+    const text = Object.assign({ view3d: '3D', viewRear: 'Rear view', viewTop: 'Top view', hint: '', note: '', modeVehicle: 'Vehicle', modeLuggage: 'Luggage area', modeLoad: 'Load area' }, options && options.text);
     const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt) e.textContent = txt; return e; };
+    const btn = (label, onClick) => { const b = el('button', '', label); b.type = 'button'; b.addEventListener('click', onClick); return b; };
     const wrap = el('div', 'v3d');
+    const modes = el('div', 'v3d-modes');
+    modes.setAttribute('role', 'group');
     const canvas = el('canvas', 'v3d-canvas');
     canvas.tabIndex = 0;
     canvas.setAttribute('role', 'img');
     const bar = el('div', 'v3d-bar');
-    const b3d = el('button', 'on', text.view3d), btop = el('button', '', text.viewTop);
-    for (const b of [b3d, btop]) b.type = 'button';
-    bar.append(b3d, btop, el('span', 'v3d-hint', text.hint));
-    wrap.append(canvas, bar, el('p', 'v3d-note', text.note));
+    const cap = el('p', 'v3d-cap');
+    cap.setAttribute('aria-live', 'polite');
+    const bMode = { vehicle: btn(text.modeVehicle, () => setMode('vehicle')), rear: btn(text.modeLoad, () => setMode('rear')) };
+    const bCam = { '3d': btn(text.view3d, () => cam('3d')), rear: btn(text.viewRear, () => cam('rear')), top: btn(text.viewTop, () => cam('top')) };
+    modes.append(bMode.vehicle, bMode.rear);
+    bar.append(bCam['3d'], bCam.rear, bCam.top, el('span', 'v3d-hint', text.hint));
+    wrap.append(modes, canvas, bar, cap, el('p', 'v3d-note', text.note));
     host.replaceChildren(wrap);
 
     const ctx = canvas.getContext('2d');
     const reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    let model = build('sedan'), yaw = -0.6, pitch = PITCH_3D, targetPitch = PITCH_3D, targetYaw = null;
+    let state = { vehicle: undefined, set: undefined, label: '', config: {} };
+    let mode = 'vehicle', camName = '3d', model = build('sedan');
+    let yaw = -0.6, pitch = PITCH_3D, zoom = 1, targetPitch = PITCH_3D, targetYaw = null, targetZoom = 1;
     let auto = !reduce, pauseUntil = 0, alpha = 1, last = 0, raf = 0, visible = true, dead = false, dragging = false, lx = 0, ly = 0;
     let w = 0, h = 0;
 
@@ -257,22 +380,48 @@
         if (Math.abs(d) < 0.01) { yaw = targetYaw; targetYaw = null; } else { yaw += d * Math.min(1, dt * 6); moving = true; }
       } else if (auto && ts > pauseUntil) { yaw += dt * 0.35; moving = true; }
       if (Math.abs(targetPitch - pitch) > 0.002) { pitch += (targetPitch - pitch) * Math.min(1, dt * 6); moving = true; } else pitch = targetPitch;
+      if (Math.abs(targetZoom - zoom) > 0.002) { zoom += (targetZoom - zoom) * Math.min(1, dt * 6); moving = true; } else zoom = targetZoom;
       if (alpha < 1) { alpha = Math.min(1, alpha + dt * 5); moving = true; }
       if (!w) size();
-      draw(ctx, w, h, model, yaw, pitch, alpha);
+      draw(ctx, w, h, model, yaw, pitch, alpha, zoom, text);
       if (moving) wake();
     }
     function touched() { pauseUntil = performance.now() + 4000; targetYaw = null; }
-    function view(top) {
-      targetPitch = top ? PITCH_TOP : PITCH_3D;
-      if (top) { auto = false; targetYaw = 0; } else { auto = !reduce; pauseUntil = 0; }
-      b3d.classList.toggle('on', !top); btop.classList.toggle('on', top);
-      b3d.setAttribute('aria-pressed', String(!top)); btop.setAttribute('aria-pressed', String(top));
-      wake();
+
+    // what the picture says, in words (for screen readers and for everyone): the view, the vehicle and what is shown
+    function describe() {
+      let s = '';
+      if (mode === 'rear') {
+        s = text['cap_' + model.rear.kind] || '';
+        s += ' ' + (model.coverage === 'selected' ? text.capSelected : model.rear.type === 'van' ? text.capPreviewVan : text.capPreviewCar);
+      }
+      cap.textContent = s.trim();
+      canvas.setAttribute('aria-label', [state.label, s.trim()].filter(Boolean).join(' — '));
     }
-    b3d.setAttribute('aria-pressed', 'true'); btop.setAttribute('aria-pressed', 'false');
-    b3d.addEventListener('click', () => view(false));
-    btop.addEventListener('click', () => view(true));
+    function refreshButtons() {
+      const van = SPECS[state.vehicle] && SPECS[state.vehicle].kind === 'van';
+      bMode.rear.textContent = van ? text.modeLoad : text.modeLuggage;
+      modes.setAttribute('aria-label', text.modes || '');
+      for (const [k, b] of Object.entries(bMode)) { b.classList.toggle('on', k === mode); b.setAttribute('aria-pressed', String(k === mode)); }
+      bCam.rear.hidden = mode !== 'rear';
+      for (const [k, b] of Object.entries(bCam)) { b.classList.toggle('on', k === camName); b.setAttribute('aria-pressed', String(k === camName)); }
+    }
+    function rebuild() {
+      model = mode === 'rear' ? buildRear(state.vehicle, state.set, state.config) : build(state.vehicle, state.set);
+      describe(); refreshButtons();
+    }
+    function cam(name) {
+      const v = VIEWS[mode][name] || VIEWS[mode]['3d'];
+      camName = VIEWS[mode][name] ? name : '3d';
+      targetPitch = v.pitch; targetZoom = v.zoom; auto = v.auto && !reduce; pauseUntil = 0;
+      targetYaw = v.yaw;
+      refreshButtons(); wake();
+    }
+    function setMode(m) {
+      if (m === mode) return;
+      mode = m; alpha = reduce ? 1 : 0;
+      rebuild(); cam('3d');
+    }
 
     canvas.addEventListener('pointerdown', e => { dragging = true; lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId); touched(); });
     canvas.addEventListener('pointermove', e => {
@@ -298,19 +447,21 @@
     if (io) io.observe(canvas);
     function destroy() { dead = true; if (raf) cancelAnimationFrame(raf); if (ro) ro.disconnect(); if (io) io.disconnect(); }
 
+    refreshButtons();
     wake();
     return {
-      set({ vehicle, set, label }) {
-        model = build(vehicle, set);
-        if (label) canvas.setAttribute('aria-label', label);
+      set({ vehicle, set, label, config }) {
+        state = { vehicle, set, label: label || '', config: config || {} };
+        rebuild();
         alpha = reduce ? 1 : 0;
         wake();
       },
+      setMode,
       destroy,
     };
   }
 
-  const api = { SPECS, SETS, VEHICLE_IDS, build, project, mount };
+  const api = { SPECS, SETS, VEHICLE_IDS, build, rearSpec, buildRear, project, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else window.Vehicle3D = api;
 })();

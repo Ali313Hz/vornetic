@@ -63,7 +63,7 @@ function publicProduct(row) {
     name: { en: row.name_en, es: row.name_es },
     desc: { en: row.desc_en, es: row.desc_es },
     status: row.status || 'available',              // available | soon
-    in_stock: row.stock > 0,
+    in_stock: row.fitment === 'car' ? true : row.stock > 0,    // made to measure: requested, not taken from stock
     base_cents: base, price_cents: min, from: min !== max,
     old_price_cents: row.old_price_cents,
     media, options, combos,

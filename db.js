@@ -143,6 +143,41 @@ CREATE TABLE IF NOT EXISTS review_moderation (
   decided_at TEXT DEFAULT (datetime('now')),
   PRIMARY KEY (product_id, user_id)
 );
+
+-- EVO (made-to-measure) mats: the vehicles the shop has a template for, and the requests customers send.
+-- A template covers exactly what its row says (see evo.js). A request is not an order: nothing is charged,
+-- no stock is held and Stripe is never involved until the shop has confirmed that the mats fit.
+CREATE TABLE IF NOT EXISTS evo_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  brand TEXT NOT NULL,
+  model TEXT DEFAULT '',               -- '' only for a pending row (brand-level: the model list is not confirmed yet)
+  aliases TEXT DEFAULT '[]',           -- JSON: the model names a customer may type (normalised)
+  year_from INTEGER DEFAULT 0,
+  year_to INTEGER DEFAULT 0,
+  body TEXT DEFAULT '',                -- type of vehicle (sedan, suv, vanlarge…) or '' = not restricted
+  wheelbase TEXT DEFAULT '',           -- L1..L4 or '' = not restricted
+  roof TEXT DEFAULT '',                -- H1..H3 or '' = not restricted
+  layout TEXT DEFAULT '',              -- cargo | kombi | crew or '' = not restricted
+  status TEXT DEFAULT 'confirmed',     -- confirmed | pending
+  note TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS evo_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ref TEXT UNIQUE NOT NULL,
+  kind TEXT NOT NULL,                  -- candidate (a template seems to cover it) | pending | measurement (no template: to be measured)
+  status TEXT DEFAULT 'new',           -- new | contacted | confirmed | needs_measurement | declined | closed
+  template_id INTEGER,
+  brand TEXT NOT NULL, model TEXT NOT NULL, year INTEGER NOT NULL,
+  veh TEXT NOT NULL, set_id TEXT NOT NULL, mat TEXT NOT NULL,
+  cargo INTEGER DEFAULT 0, layout TEXT DEFAULT '', rows TEXT DEFAULT '', wheelbase TEXT DEFAULT '', roof TEXT DEFAULT '', seats TEXT DEFAULT '',
+  selection TEXT DEFAULT '{}',         -- JSON: the labels of the choices in both languages
+  ref_price_cents INTEGER,             -- the list price of the chosen set; the shop confirms the real one
+  name TEXT NOT NULL, email TEXT NOT NULL, phone TEXT NOT NULL,
+  municipality TEXT DEFAULT '', zip TEXT DEFAULT '',
+  message TEXT DEFAULT '', admin_note TEXT DEFAULT '', lang TEXT DEFAULT 'es',
+  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+);
 `);
 
 // Columns added after the first version (safe to run on every start)
@@ -307,6 +342,7 @@ const DEFAULT_SETTINGS = {
   company_holder: '',                // legal name of the owner (Titular), shown on the legal pages with the NIF
   company_nif: '',
   company_address: 'Madrid, España',
+  evo_measure_zip_prefixes: '28',    // EVO: postcodes (starts with) where the shop can measure a vehicle in person; 28 = Madrid
 };
 const insSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
 
@@ -317,6 +353,11 @@ if (oldShip) {
   db.prepare("UPDATE settings SET value = '395' WHERE key = 'ship_es_cents' AND value = '0'").run();
 }
 for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) insSetting.run(k, v);
+// EVO templates the owner has (see evo.js): put in once, never again over the owner's edits or deletions
+if (insSetting.run('evo_templates_seeded', '1').changes && !db.prepare('SELECT 1 FROM evo_templates LIMIT 1').get()) {
+  const ins = db.prepare('INSERT INTO evo_templates (brand, model, aliases, year_from, year_to, body, wheelbase, roof, layout, status, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+  for (const t of require('./evo').SEED_TEMPLATES) ins.run(t.brand, t.model, JSON.stringify(t.aliases), t.year_from, t.year_to, t.body, t.wheelbase, t.roof, t.layout, t.status, t.note);
+}
 // Bulb list per car: first version comes from data/bulbs.txt, then it is edited in the admin panel
 try { insSetting.run('bulbs_text', fs.readFileSync(path.join(__dirname, 'data', 'bulbs.txt'), 'utf8')); } catch {}
 

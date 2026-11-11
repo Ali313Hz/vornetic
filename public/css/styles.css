@@ -222,6 +222,22 @@ select.in:disabled { background-color: var(--soft); color: var(--muted); }
 .v3d-bar button { min-height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface); font-size: 13px; font-weight: 600; cursor: pointer; }
 .v3d-bar button.on { background: var(--ink); border-color: var(--ink); color: #fff; }
 .v3d-hint { margin-left: auto; font-size: 13px; color: var(--muted); }
+.v3d-modes { display: flex; gap: 8px; padding: 10px 12px 0; }
+.v3d-modes button { min-height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface); font-size: 13px; font-weight: 600; cursor: pointer; }
+.v3d-modes button.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.v3d-bar { flex-wrap: wrap; }
+.v3d-bar button[hidden] { display: none; }
+.v3d-cap { margin: 0; padding: 0 12px 10px; font-size: 13px; color: var(--text); }
+.v3d-cap:empty { display: none; }
+.hero-cta { display: flex; flex-wrap: wrap; gap: 10px; }
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.notice.warn { color: #7a4b00; border-color: #ecd9a8; background: #fdf6e3; }
+.evo-how { margin-bottom: 16px; }
+.evo-tpl { margin: 10px 0 0; padding-left: 18px; }
+.evo-tpl li { margin: 4px 0; }
+.evo-done:focus { outline: none; }
+.evo-done h2 { font-size: 20px; }
+#vehBox + .carbox, #evoMeasure, #evoContact { margin-top: 0; }
 .v3d-note { margin: 0; padding: 10px 12px 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
 #photos:not(:empty) { margin-top: 14px; }
 .v3d-m { display: none; }

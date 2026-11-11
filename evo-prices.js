@@ -71,9 +71,9 @@ const desc_es = `Alfombrillas cortadas a la medida exacta de tu vehículo: marca
 
 Dos materiales con el mismo corte a medida. Estándar: la opción económica, protección completa del suelo para el uso diario. Premium: material de mayor calidad, con mejor acabado y más resistente al uso intensivo.
 
-Elige el tipo de vehículo, el juego y el material, y escribe la marca, el modelo y el año de tu vehículo: con eso tenemos la medida. La imagen 3D es solo ilustrativa.
+Elige el tipo de vehículo, el juego y el material, y escribe la marca, el modelo y el año de tu vehículo. Se envía como solicitud: comprobamos que tenemos plantilla para tu vehículo (si no, habría que medirlo en persona, solo en la zona de Madrid) y te respondemos. No se cobra nada hasta que lo confirmemos. La imagen 3D es solo ilustrativa.
 
-Cada juego se fabrica bajo pedido y se envía en 3–5 días laborables.`;
+Cada juego se fabrica bajo pedido. El plazo de fabricación y de envío te lo confirmamos al responder tu solicitud.`;
 
 const desc_en = `Mats cut to the exact size of your vehicle: brand, model and year. They cover the floor with no gaps or folds.
 
@@ -86,9 +86,9 @@ const desc_en = `Mats cut to the exact size of your vehicle: brand, model and ye
 
 Two materials with the same made-to-measure cut. Standard: the budget option, full floor protection for everyday use. Premium: a higher-quality material with a better finish that stands up to heavy use.
 
-Choose the type of vehicle, the set and the material, and write your vehicle's brand, model and year: that gives us the size. The 3D picture is only an illustration.
+Choose the type of vehicle, the set and the material, and write your vehicle's brand, model and year. It is sent as a request: we check that we have a template for your vehicle (if not, it would have to be measured in person, in the Madrid area only) and answer you. Nothing is charged until we have confirmed it. The 3D picture is only an illustration.
 
-Each set is made to order and ships in 3–5 working days.`;
+Each set is made to order. We confirm the production and delivery time when we answer your request.`;
 
 // Extra price list (text format of the "Prices" tab: "# Title | column | column", then "Row | price | price").
 // The cabin sets of vans are options above, so the tab shows them already; only the load-area floors are here.

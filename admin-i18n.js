@@ -53,6 +53,11 @@ const MESSAGES = [
   // reviews
   ['Geçersiz durum', null, 'Estado no válido'],
   ['Cevap en fazla 1000 karakter', null, 'La respuesta puede tener como máximo 1000 caracteres'],
+  // EVO requests and templates
+  ['Marka zorunlu', null, 'La marca es obligatoria'],
+  ['Onaylı şablonda model zorunlu', null, 'Una plantilla confirmada necesita el modelo'],
+  ['Geçersiz yıl aralığı', null, 'Rango de años no válido'],
+  ['Geçersiz seçim', null, 'Opción no válida'],
   // finance
   ['Tür "income" ya da "expense" olmalı', null, 'El tipo debe ser "income" o "expense"'],
   ['Geçerli bir tarih gir (YYYY-AA-GG)', null, 'Escribe una fecha válida (AAAA-MM-DD)'],
