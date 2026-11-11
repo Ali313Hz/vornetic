@@ -566,6 +566,9 @@ const orderMsg = (lang, key, p, vars = {}) => ORDER_MSG[key][lang === 'es' ? 1 :
 function cleanLine(it, lang) {
   const p = db.prepare("SELECT * FROM products WHERE id = ? AND status = 'available'").get(Number(it.id));
   if (!p) throw new Error(orderMsg(lang, 'gone'));
+  // Made-to-measure (EVO) mats are never an order, whatever their stock: they are a request the shop confirms first
+  // (see /api/evo/requests), so nothing for them can reach the payment page or take stock.
+  if (p.fitment === 'car') throw new Error(orderMsg(lang, 'evo_request', p));
   if (p.stock <= 0) throw new Error(orderMsg(lang, 'out', p));
   const qty = Math.min(10, Math.max(1, parseInt(it.qty, 10) || 1));
   let sel;
@@ -577,9 +580,6 @@ function cleanLine(it, lang) {
     throw new Error(orderMsg(lang, e.code, choice));
   }
   const { unit, labels, labelsEs } = sel;
-  // Made-to-measure (EVO) mats are never an order: they are a request the shop confirms first (see /api/evo/requests),
-  // so nothing for them can reach the payment page or take stock.
-  if (p.fitment === 'car') throw new Error(orderMsg(lang, 'evo_request', p));
   return { id: p.id, name: p.name_en, name_es: p.name_es, qty, unit_cents: unit, options: labels, options_es: labelsEs, car: null };
 }
 

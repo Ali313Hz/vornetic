@@ -95,6 +95,10 @@ test('made-to-measure (EVO) products are never an order: refused whatever is sen
       const a = await srv.buy([item], 'es'), b = await srv.buy([item], 'en');
       assert.deepStrictEqual([a.status, a.body.error, b.status, b.body.error], [400, es, 400, en], why);
     }
+    // an EVO product with no stock (as in a shop made before requests) gives the same answer, not "out of stock"
+    const none = await srv.product({ fitment: 'car', stock: 0 });
+    const zero = await srv.buy([{ id: none.id, qty: 1, car }], 'en');
+    assert.deepStrictEqual([zero.status, zero.body.error], [400, en]);
     // inside a bigger cart it refuses the whole order: nothing else is taken either
     const other = await srv.product({});
     const mixed = await srv.buy([{ id: other.id, qty: 1 }, { id: p.id, qty: 1, car }]);
