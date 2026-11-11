@@ -1,6 +1,8 @@
 // seed.js — first catalogue, inserted only when the products table is empty.
 // After the first start, edit everything from /admin.
 
+const { product: EVO } = require('./evo-prices');
+
 const P = '/img/products';
 const TEMPS = ['4300K', '6000K', '8000K'];
 
@@ -72,20 +74,17 @@ module.exports = function seed(db) {
     SAFETY[p.slug]?.en || '', SAFETY[p.slug]?.es || '');
 
   // ---------------- EVO custom mats ----------------
+  // Options, prices and texts come from evo-prices.js (the shop's price list), already in the
+  // current format (opts / combos / media), so db.js has nothing to convert for this product.
   add({
     slug: 'evo-custom-mats', category: 'mats', sort: 0, fitment: 'car',
-    name_en: 'EVO Custom-Fit Car Mats', name_es: 'Alfombrillas EVO a medida',
-    desc_en: `Made to measure for your exact car: brand, model, generation and year. Honeycomb EVO material with stitched edges, waterproof and easy to clean. Original fixing clips included where your car has them.
-
-Each set is made to order and ships in 3–5 working days.`,
-    desc_es: `Hechas a medida para tu coche exacto: marca, modelo, generación y año. Material EVO en panal con bordes cosidos, impermeable y fácil de limpiar. Incluye anclajes originales si tu coche los tiene.
-
-Cada juego se fabrica bajo pedido y se envía en 3–5 días laborables.`,
-    price: 5990, image: '/img/p-mat-evo.svg',
-    options: `Set | Juego: Front (2 pcs) / Delanteras (2 uds), Full set (4 pcs) / Juego completo (4 uds) +15, Full set + boot / Juego completo + maletero +35
-Mat colour | Color de alfombrilla: Black / Negro, Grey / Gris, Beige / Beige, Brown / Marrón, Blue / Azul, Red / Rojo
-Stitching colour | Color de costura: Black / Negro, Red / Rojo, Blue / Azul, Grey / Gris, Beige / Beige`,
+    name_en: EVO.name_en, name_es: EVO.name_es, desc_en: EVO.desc_en, desc_es: EVO.desc_es,
+    price: EVO.price_cents, image: '/img/p-mat-evo.svg',
   });
+  // "Coming soon" until the owner switches it on in /admin
+  db.prepare("UPDATE products SET status = 'soon', opts = ?, combos = ?, media = ?, prices_en = ?, prices_es = ? WHERE slug = 'evo-custom-mats'")
+    .run(JSON.stringify(EVO.options), JSON.stringify(EVO.combos), JSON.stringify([{ type: 'image', src: '/img/p-mat-evo.svg' }]),
+      EVO.prices_en, EVO.prices_es);
 
   // ---------------- Xenon (4 quality levels) ----------------
   add({

@@ -623,6 +623,7 @@ function editProduct(src) {
     category: CATS[0]?.slug || '', fitment: 'universal', status: 'available',
     name_es: '', name_en: '', desc_es: '', desc_en: '', price_cents: 0, old_price_cents: null, stock: 10, sort: 50,
     options: [], combos: {}, media: [], manufacturer: '', eu_responsible: '', safety_es: '', safety_en: '',
+    prices_es: '', prices_en: '',
   };
   let openMedia = null;     // which value / combination has its media panel open
   let comboFilter = '';
@@ -762,6 +763,13 @@ function editProduct(src) {
         <label class="f"><span>${L('İspanyolca', 'Español')}</span><textarea class="in" data-f="desc_es" rows="7">${esc(P.desc_es)}</textarea></label>
         <label class="f" style="margin:0"><span>${L('İngilizce', 'Inglés')}</span><textarea class="in" data-f="desc_en" rows="7">${esc(P.desc_en)}</textarea></label>
       </div>
+
+      <details class="box"${P.prices_es || P.prices_en ? ' open' : ''}><summary><b>${L('Ek fiyat listesi', 'Lista de precios adicional')}</b> <span class="muted">(${L('ürün sayfasındaki "Precios" sekmesi', 'pestaña "Precios" de la página del producto')})</span></summary>
+        <p class="muted small" style="margin:12px 0">${L('Araca özel ürünlerde yukarıdaki seçeneklerin fiyatları "Precios" sekmesinde kendiliğinden görünür. Buraya sadece sitede seçenek olarak satılmayan fiyatları yaz (ör. kamyonetler). Her tablo "# Başlık | sütun | sütun" satırıyla başlar; sonraki her satır "Ad · açıklama | fiyat | fiyat". "|" olmayan satırlar tablonun altında not olarak çıkar.',
+          'En los productos a medida, los precios de las opciones de arriba salen solos en la pestaña "Precios". Escribe aquí solo los precios que no se venden como opción en la web (ej. furgonetas). Cada tabla empieza con "# Título | columna | columna"; cada línea siguiente es "Nombre · detalle | precio | precio". Las líneas sin "|" salen como nota debajo de las tablas.')}</p>
+        <label class="f"><span>${L('İspanyolca', 'Español')}</span><textarea class="in mono" data-f="prices_es" rows="8" spellcheck="false" placeholder="# Furgonetas · juego de cabina | Estándar | Premium&#10;Furgoneta pequeña · Berlingo, Caddy | 40 € | 50 €">${esc(P.prices_es)}</textarea></label>
+        <label class="f" style="margin:0"><span>${L('İngilizce', 'Inglés')}</span><textarea class="in mono" data-f="prices_en" rows="8" spellcheck="false">${esc(P.prices_en)}</textarea></label>
+      </details>
 
       <details class="box"><summary><b>${L('Ürün güvenliği bilgisi', 'Seguridad del producto')}</b> <span class="muted">(${L('AB kuralı — ürün sayfasında görünür', 'norma UE — sale en la página del producto')})</span></summary>
         <div class="grid2" style="margin-top:12px">

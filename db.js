@@ -155,6 +155,10 @@ for (const sql of [
   "ALTER TABLE products ADD COLUMN eu_responsible TEXT DEFAULT ''",
   "ALTER TABLE products ADD COLUMN safety_en TEXT DEFAULT ''",
   "ALTER TABLE products ADD COLUMN safety_es TEXT DEFAULT ''",
+  // Extra price list shown in the product's "Prices" tab (text, see priceTables in public/js/app.js):
+  // prices that are not options of the product, e.g. the van sizes of the made-to-measure mats
+  "ALTER TABLE products ADD COLUMN prices_en TEXT DEFAULT ''",
+  "ALTER TABLE products ADD COLUMN prices_es TEXT DEFAULT ''",
   // v2: structured options, variant photos/videos, coming-soon status (see catalog.js)
   "ALTER TABLE products ADD COLUMN opts TEXT DEFAULT ''",
   "ALTER TABLE products ADD COLUMN combos TEXT DEFAULT ''",

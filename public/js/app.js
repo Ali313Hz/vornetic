@@ -9,9 +9,8 @@ const T = {
     nav_car: 'Shop by car', nav_xenon: 'Xenon', nav_led: 'LED', nav_mats: 'Car mats', nav_home: 'Home',
     hero_title: 'Lighting and mats for your car',
     hero_lead: 'Xenon and LED bulbs, universal mats and EVO mats made to measure. Shipped from Spain.',
-    finder_title: 'Find your car', brand: 'Brand', model: 'Model', gen: 'Generation', year: 'Year', engine: 'Engine',
+    finder_title: 'Find your car', brand: 'Brand', model: 'Model', gen: 'Generation', year: 'Year',
     choose_brand: 'Brand', choose_model: 'Model', choose_gen: 'Generation', choose_year: 'Year',
-    choose_engine: 'Engine (optional)',
     show: 'Show products', my_car: 'Your car', change: 'Change',
     not_listed: 'Car not listed? Message us and we will check it.',
     categories: 'Categories', all_products: 'All products',
@@ -96,6 +95,8 @@ const T = {
     forgot_sent: 'If there is an account with this email, you will receive a link in a few minutes. Check your spam folder too.',
     new_password_title: 'Choose a new password', back_login: 'Back to log in',
     soon: 'Coming soon', soon_short: 'soon', opt_out: 'Out of stock', soon_note: 'This product will be available very soon.',
+    tab_desc: 'Description', tab_prices: 'Prices', see_prices: 'See all prices', prices_note: 'Price per set, VAT included.',
+    prices_ask: 'Ask for a quote on WhatsApp', prices_ask_msg: 'I would like a quote for my vehicle (brand, model and year):',
     notify_wa: 'Tell me when it arrives', notify_msg: 'Please tell me when it arrives', cat_empty: 'New products are coming soon.',
     bulbs_title: 'Bulbs for your car', b_low: 'Low beam (halogen)', b_high: 'High beam', b_fog: 'Fog lights',
     b_xenon: 'Xenon headlights (factory)', b_h4: 'Headlights (low + high beam)', b_see: 'See', b_none: 'Not sold here',
@@ -109,9 +110,8 @@ const T = {
     nav_car: 'Buscar por coche', nav_xenon: 'Xenón', nav_led: 'LED', nav_mats: 'Alfombrillas', nav_home: 'Inicio',
     hero_title: 'Iluminación y alfombrillas para tu coche',
     hero_lead: 'Bombillas xenón y LED, alfombrillas universales y alfombrillas EVO a medida. Enviamos desde España.',
-    finder_title: 'Busca tu coche', brand: 'Marca', model: 'Modelo', gen: 'Generación', year: 'Año', engine: 'Motor',
+    finder_title: 'Busca tu coche', brand: 'Marca', model: 'Modelo', gen: 'Generación', year: 'Año',
     choose_brand: 'Marca', choose_model: 'Modelo', choose_gen: 'Generación', choose_year: 'Año',
-    choose_engine: 'Motor (opcional)',
     show: 'Ver productos', my_car: 'Tu coche', change: 'Cambiar',
     not_listed: '¿No encuentras tu coche? Escríbenos y lo comprobamos.',
     categories: 'Categorías', all_products: 'Todos los productos',
@@ -196,6 +196,8 @@ const T = {
     forgot_sent: 'Si existe una cuenta con este email, recibirás un enlace en unos minutos. Mira también en la carpeta de spam.',
     new_password_title: 'Elige una nueva contraseña', back_login: 'Volver a iniciar sesión',
     soon: 'Próximamente', soon_short: 'pronto', opt_out: 'Agotado', soon_note: 'Este producto estará disponible muy pronto.',
+    tab_desc: 'Descripción', tab_prices: 'Precios', see_prices: 'Ver todos los precios', prices_note: 'Precio por juego, IVA incluido.',
+    prices_ask: 'Pedir presupuesto por WhatsApp', prices_ask_msg: 'Quiero un presupuesto para mi vehículo (marca, modelo y año):',
     notify_wa: 'Avísame cuando llegue', notify_msg: 'Avísame cuando llegue', cat_empty: 'Muy pronto tendremos productos aquí.',
     bulbs_title: 'Bombillas de tu coche', b_low: 'Luz de cruce (halógena)', b_high: 'Luz de carretera', b_fog: 'Antiniebla',
     b_xenon: 'Faros xenón (de serie)', b_h4: 'Faros (cruce + carretera)', b_see: 'Ver', b_none: 'No disponible',
@@ -545,13 +547,14 @@ function card(p, o) {
 }
 const gridHtml = (list, o) => `<div class="grid">${list.map(p => card(p, o)).join('')}</div>`;
 
-// Brand → model → generation → year → engine. onChange({brand, model, gen, year, engine} | null)
+// Brand → model → generation → year. onChange({brand, model, gen, year} | null)
+// (no engine: neither the bulbs nor the mats of a car depend on it)
 function mountCarSelect(root, initial, onChange) {
-  root.innerHTML = ['brand', 'model', 'gen', 'year', 'engine'].map(k =>
+  root.innerHTML = ['brand', 'model', 'gen', 'year'].map(k =>
     `<select class="in" data-k="${k}" aria-label="${esc(t(k))}"></select>`).join('');
   const s = Object.fromEntries($$('select', root).map(el => [el.dataset.k, el]));
   const opt = (v, label, sel) => `<option value="${esc(v)}"${sel ? ' selected' : ''}>${esc(label)}</option>`;
-  const cur = { brand: '', model: '', gen: '', year: '', engine: '', ...(initial || {}) };
+  const cur = { brand: '', model: '', gen: '', year: '', ...(initial || {}) };
   const gens = () => CARS[cur.brand]?.[cur.model] || [];
   const genObj = () => gens().find(g => g.gen === cur.gen);
   function fill() {
@@ -565,21 +568,19 @@ function mountCarSelect(root, initial, onChange) {
     let years = '';
     if (g) for (let y = g.to; y >= g.from; y--) years += opt(y, y, String(y) === String(cur.year));
     s.year.innerHTML = opt('', t('choose_year')) + years;
-    s.engine.disabled = !g || !g.engines.length;
-    s.engine.innerHTML = opt('', t('choose_engine')) + (g ? g.engines.map(e => opt(e, e, e === cur.engine)).join('') : '');
   }
   fill();
   root.addEventListener('change', e => {
     const k = e.target.dataset.k;
     if (!k) return;
     cur[k] = e.target.value;
-    const order = ['brand', 'model', 'gen', 'year', 'engine'];
-    // reset the steps after the one that changed (the engine survives a year change)
-    order.slice(order.indexOf(k) + 1).forEach(x => { if (!(k === 'year' && x === 'engine')) cur[x] = ''; });
+    const order = ['brand', 'model', 'gen', 'year'];
+    // reset the steps after the one that changed
+    order.slice(order.indexOf(k) + 1).forEach(x => { cur[x] = ''; });
     if (k === 'model' && gens().length === 1) cur.gen = gens()[0].gen;
     fill();
     const done = cur.brand && cur.model && cur.gen && cur.year;
-    onChange(done ? { brand: cur.brand, model: cur.model, gen: cur.gen, year: +cur.year, engine: cur.engine } : null);
+    onChange(done ? { brand: cur.brand, model: cur.model, gen: cur.gen, year: +cur.year } : null);
   });
 }
 
@@ -744,6 +745,62 @@ function mountGallery(root, name) {
   return { show };
 }
 
+/* ================= "Prices" tab of a product ================= */
+// Extra price list of a product, written as text in /admin (prices that are not options to buy,
+// e.g. the van sizes of the made-to-measure mats):
+//   # Title | column | column     starts a table
+//   Row name | price | price      a row ("Name · detail": the detail is shown smaller)
+//   any other line                a note under the tables
+function priceTables(text) {
+  const tables = [], notes = [];
+  let cur = null;
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const cells = line.replace(/^#\s*/, '').split('|').map(s => s.trim());
+    if (line.startsWith('#')) { cur = { title: cells[0], cols: cells.slice(1), rows: [] }; tables.push(cur); }
+    else if (cells.length > 1) {
+      if (!cur) { cur = { title: '', cols: [], rows: [] }; tables.push(cur); }
+      cur.rows.push(cells);
+    } else notes.push(line);
+  }
+  return { tables: tables.filter(tb => tb.rows.length), notes };
+}
+// The price of every choice that can be bought, from the product's own options — the same numbers
+// the cart charges. Columns = the last option; rows = the one before; with three options, one table
+// per value of the first. Choices that are not sold are left out.
+function optionTables(p) {
+  const n = p.options.length;
+  if (!n) return [];
+  const last = p.options[n - 1];
+  const cell = ids => comboSellable(p, ids) ? eur(comboPrice(p, ids)) : '—';
+  const sold = rows => rows.filter(r => r.slice(1).some(c => c !== '—'));
+  if (n === 1) return [{ title: L(last), cols: [], rows: sold(last.values.map(v => [L(v), cell([v.id])])) }].filter(tb => tb.rows.length);
+  const cols = last.values.map(v => L(v));
+  const rowsFor = pre => sold(p.options[n - 2].values.map(r => [L(r), ...last.values.map(c => cell([...pre, r.id, c.id]))]));
+  const tables = n === 2 ? [{ title: L(p.options[0]), cols, rows: rowsFor([]) }]
+    : p.options[0].values.map(g => ({ title: L(g), cols, rows: rowsFor([g.id]) }));
+  return tables.filter(tb => tb.rows.length);
+}
+function priceTableHtml(tb) {
+  const name = s => { const [main, ...rest] = s.split(' · '); return `${esc(main)}${rest.length ? `<small>${esc(rest.join(' · '))}</small>` : ''}`; };
+  return `<table class="ptable">
+    ${tb.title || tb.cols.length ? `<thead><tr><th scope="col">${esc(tb.title)}</th>${tb.cols.map(c => `<th scope="col">${esc(c)}</th>`).join('')}</tr></thead>` : ''}
+    <tbody>${tb.rows.map(([label, ...cells]) => `<tr><th scope="row">${name(label)}</th>${cells.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+  </table>`;
+}
+// '' when the product has no price list to show (then the page has no tabs)
+function pricesHtml(p) {
+  const own = p.fitment === 'car' ? optionTables(p) : [];
+  const extra = priceTables(L(p.prices));
+  if (!own.length && !extra.tables.length) return '';
+  return `${own.map(priceTableHtml).join('')}
+    ${own.length ? `<p class="muted small">${esc(t('prices_note'))}</p>` : ''}
+    ${extra.tables.map(priceTableHtml).join('')}
+    ${extra.notes.map(n => `<p class="muted small">${esc(n)}</p>`).join('')}
+    ${extra.tables.length && CONFIG.whatsapp ? `<a class="btn ghost sm" href="${waLink(`${L(p.name)} — ${t('prices_ask_msg')}`)}" target="_blank" rel="noopener">${esc(t('prices_ask'))}</a>` : ''}`;
+}
+
 async function viewProduct(slug) {
   const id = renderId;
   const p = await api('/api/products/' + encodeURIComponent(slug));
@@ -752,6 +809,7 @@ async function viewProduct(slug) {
   const cat = catBySlug(p.category);
   const soon = p.status === 'soon';
   const canBuy = !soon && p.in_stock;
+  const prices = pricesHtml(p);
   const sel = {};
   let car = p.fitment === 'car' ? myCar.get() : null;
   let qty = 1;
@@ -766,10 +824,11 @@ async function viewProduct(slug) {
         <h1 class="ptitle">${esc(L(p.name))}</h1>
         <button type="button" class="rv-sum" id="rvSum" hidden></button>
         <div class="price" id="price"></div>
+        ${prices ? `<p class="see-prices"><button type="button" class="link" id="seePrices">${esc(t('see_prices'))}</button></p>` : ''}
         ${soon ? `<div class="notice soon-note">${esc(t('soon_note'))}${CONFIG.whatsapp ? ` <a class="link" href="${waLink(`${t('notify_msg')}: ${L(p.name)}`)}" target="_blank" rel="noopener">${esc(t('notify_wa'))}</a>` : ''}</div>` : ''}
         ${p.fitment === 'car' ? `<div class="carbox"><h3>${ICON.car} ${esc(t('finder_title'))}</h3><div class="car-row" id="pCar"></div>
           ${CONFIG.whatsapp ? `<p class="muted small" style="margin:10px 0 0"><a class="link" href="${waLink(L(p.name))}" target="_blank" rel="noopener">${esc(t('not_listed'))}</a></p>` : ''}</div>` : ''}
-        ${p.options.map(o => `<div class="opt-group" data-o="${esc(o.id)}">
+        ${p.options.map(o => `<div class="opt-group${o.values.length === 1 && !o.values[0].soon && !o.values[0].out ? ' one' : ''}" data-o="${esc(o.id)}">
           <span>${esc(L(o))}: <b data-chosen></b></span>
           <div class="opts">${o.values.map(v => `<button type="button" class="opt" data-v="${esc(v.id)}">${esc(L(v))}${v.soon
             ? `<small>${esc(t('soon_short'))}</small>` : v.out ? `<small>${esc(t('opt_out'))}</small>` : ''}</button>`).join('')}</div>
@@ -780,7 +839,12 @@ async function viewProduct(slug) {
           <button class="btn" id="addBtn" ${canBuy ? '' : 'disabled'}>${esc(soon ? t('soon') : p.in_stock ? t('add') : t('sold_out'))}</button>
         </div>
         <p class="muted small">${esc(t('tax_incl'))} · ${esc(p.fitment === 'car' ? t('made_days') : t('trust1s'))}</p>
-        <div class="desc">${esc(L(p.desc))}</div>
+        ${prices ? `<div class="ptabs" role="tablist">
+          <button type="button" class="ptab on" role="tab" id="tabDesc" aria-selected="true" aria-controls="paneDesc" data-pane="paneDesc">${esc(t('tab_desc'))}</button>
+          <button type="button" class="ptab" role="tab" id="tabPrices" aria-selected="false" aria-controls="panePrices" data-pane="panePrices">${esc(t('tab_prices'))}</button>
+        </div>` : ''}
+        <div class="desc${prices ? ' in-tabs' : ''}" id="paneDesc"${prices ? ' role="tabpanel" aria-labelledby="tabDesc"' : ''}>${esc(L(p.desc))}</div>
+        ${prices ? `<div class="prices" id="panePrices" role="tabpanel" aria-labelledby="tabPrices" hidden>${prices}</div>` : ''}
         <details class="safety">
           <summary>${esc(t('safety_title'))}</summary>
           ${p.manufacturer ? `<p><b>${esc(t('manufacturer'))}</b><br>${esc(p.manufacturer)}</p>` : ''}
@@ -795,6 +859,16 @@ async function viewProduct(slug) {
 
   const gallery = mountGallery($('#gallery'), L(p.name));
   mountReviews(p, id);
+
+  // Description / Prices tabs ("See all prices" under the price opens the second one)
+  const showPane = pane => $$('.ptab').forEach(b => {
+    const on = b.dataset.pane === pane;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', String(on));
+    $('#' + b.dataset.pane).hidden = !on;
+  });
+  $$('.ptab').forEach(b => b.addEventListener('click', () => showPane(b.dataset.pane)));
+  $('#seePrices')?.addEventListener('click', () => { showPane('panePrices'); $('.ptabs').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
 
   // Preselect: options with one value, and ?o=H7 from the bulb finder
   p.options.forEach(o => { if (o.values.length === 1 && !o.values[0].soon) sel[o.id] = o.values[0].id; });

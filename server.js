@@ -1301,6 +1301,7 @@ function adminProduct(row) {
     price_cents: row.price_cents, old_price_cents: row.old_price_cents, stock: row.stock, sort: row.sort,
     options, combos, media,
     manufacturer: row.manufacturer, eu_responsible: row.eu_responsible, safety_en: row.safety_en, safety_es: row.safety_es,
+    prices_en: row.prices_en || '', prices_es: row.prices_es || '',
   };
 }
 app.get('/api/admin/products', requireAdmin, (req, res) => {
@@ -1325,6 +1326,7 @@ function productFields(b) {
     image: media.find(m => m.type === 'image')?.src || '',
     manufacturer: str(b.manufacturer, 500), eu_responsible: str(b.eu_responsible, 500),
     safety_en: str(b.safety_en, 2000), safety_es: str(b.safety_es, 2000),
+    prices_en: str(b.prices_en, 4000), prices_es: str(b.prices_es, 4000),
   };
   f.active = f.status === 'hidden' ? 0 : 1;
   if (!categoryExists(f.category)) throw new Error('Kategori seç');

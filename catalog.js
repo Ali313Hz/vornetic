@@ -70,6 +70,7 @@ function publicProduct(row) {
     image: media.find(m => m.type === 'image')?.src || row.image || '',
     fitment: row.fitment,
     safety: { en: row.safety_en || '', es: row.safety_es || '' },
+    prices: { en: row.prices_en || '', es: row.prices_es || '' },   // extra price list (text) for the "Prices" tab
     manufacturer: row.manufacturer || '', eu_responsible: row.eu_responsible || '',
   };
 }

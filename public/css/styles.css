@@ -128,8 +128,8 @@ select.in:disabled { background-color: var(--soft); color: var(--muted); }
 /* ---------- Car finder ---------- */
 .finder { background: var(--soft); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
 .finder h3 { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.car-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
-.finder .car-row { grid-template-columns: repeat(5, 1fr) auto; }
+.car-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.finder .car-row { grid-template-columns: repeat(4, 1fr) auto; }
 .car-row .btn { min-width: 130px; }
 @media (max-width: 960px) {
   .car-row, .finder .car-row { grid-template-columns: 1fr 1fr; }
@@ -211,12 +211,33 @@ select.in:disabled { background-color: var(--soft); color: var(--muted); }
 .buy-row { display: flex; gap: 10px; margin: 6px 0 14px; }
 .buy-row .btn { flex: 1; }
 .desc { color: #3a3a3c; white-space: pre-line; border-top: 1px solid var(--line); padding-top: 18px; margin-top: 8px; }
+/* an option with one value is not a choice: its name and value are shown, without a button */
+.opt-group.one .opts { display: none; }
+.opt-group.one { margin-bottom: 10px; }
+/* Description / Prices tabs of a product */
+.see-prices { margin: -12px 0 16px; font-size: 14px; }
+.see-prices button { padding: 0; border: 0; background: none; cursor: pointer; color: var(--text); }
+.ptabs { display: flex; gap: 22px; margin-top: 8px; border-bottom: 1px solid var(--line); scroll-margin-top: 130px; }
+.ptab { padding: 12px 0 10px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none; cursor: pointer; font-weight: 600; color: var(--muted); }
+.ptab.on { color: var(--text); border-bottom-color: var(--ink); }
+.desc.in-tabs { border-top: 0; margin-top: 0; }
+.prices { padding-top: 18px; }
+.prices > p { margin: 10px 0 0; }
+.prices > .btn { margin-top: 14px; }
+.ptable { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 4px; }
+.ptable + .ptable, .prices > p + .ptable { margin-top: 22px; }
+.ptable th, .ptable td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.ptable thead th { font-size: 13px; color: var(--muted); font-weight: 600; border-bottom-color: var(--line-2); }
+.ptable thead th:first-child { color: var(--text); font-size: 15px; }
+.ptable tbody th { font-weight: 500; }
+.ptable tbody th small { display: block; color: var(--muted); font-weight: 400; font-size: 13px; }
+.ptable td, .ptable thead th + th { text-align: right; white-space: nowrap; width: 1%; padding-left: 14px; }
+.ptable td { font-weight: 600; }
 .notice { font-size: 14px; padding: 12px 14px; border-radius: 10px; background: var(--soft); border: 1px solid var(--line); color: var(--muted); }
 .notice.err { color: var(--bad); border-color: #ecc8c5; background: #fbf1f0; }
 .notice.ok { color: var(--ok); border-color: #c8e3d2; background: #f1f8f3; }
 .carbox { padding: 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--soft); margin-bottom: 18px; }
 .carbox .car-row { grid-template-columns: 1fr 1fr; }
-.carbox .car-row select:last-child { grid-column: 1 / -1; }
 @media (max-width: 460px) { .carbox .car-row { grid-template-columns: 1fr; } }
 .carbox h3 { font-size: 15px; display: flex; gap: 8px; align-items: center; }
 
